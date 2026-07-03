@@ -42,25 +42,28 @@ def _pack_and_resolver(pack_dir: str):
     return pack, resolver
 
 
-def _cmd_steps(pack_dir: str) -> int:
+def _cmd_steps(pack_dir: str, variant: "str | None") -> int:
     pack, resolver = _pack_and_resolver(pack_dir)
     print(
         json.dumps(
             {"pack": pack.name, "version": pack.version,
-             "steps": expand_steps(pack, resolver)},
+             "variant": variant or pack.default_variant,
+             "variants": pack.variants,
+             "steps": expand_steps(pack, resolver, variant=variant)},
             indent=2,
         )
     )
     return EXIT_PASS
 
 
-def _run(pack_dir: str, apply_fixes: bool) -> int:
+def _run(pack_dir: str, apply_fixes: bool, variant: "str | None") -> int:
     pack, resolver = _pack_and_resolver(pack_dir)
-    result = run_pack(pack, resolver=resolver, apply_fixes=apply_fixes)
+    result = run_pack(pack, resolver=resolver, apply_fixes=apply_fixes, variant=variant)
 
     payload = {
         "pack": pack.name,
         "mode": "remediate" if apply_fixes else "verify",
+        "variant": variant or pack.default_variant,
         "passed": result.passed,
         "stopped_at": result.stopped_at,
         "outcomes": [asdict(o) for o in result.outcomes],
@@ -68,7 +71,7 @@ def _run(pack_dir: str, apply_fixes: bool) -> int:
     # On failure, attach the stopped step's instruction + exact fix so the skill
     # can build the four-part failure message (interaction-design Rule 2).
     if not result.passed and result.stopped_at is not None:
-        for s in expand_steps(pack, resolver):
+        for s in expand_steps(pack, resolver, variant=variant):
             if s["id"] == result.stopped_at:
                 payload["stopped_step"] = {
                     "id": s["id"],
@@ -93,16 +96,21 @@ def main(argv: "list[str] | None" = None) -> int:
     for name in ("steps", "verify", "remediate"):
         p = sub.add_parser(name)
         p.add_argument("pack_dir", help="folder containing pack.yaml")
+        p.add_argument(
+            "--variant",
+            default=None,
+            help="which variant to run (e.g. local / hosted); default = pack's default_variant",
+        )
 
     args = parser.parse_args(argv)
 
     try:
         if args.command == "steps":
-            return _cmd_steps(args.pack_dir)
+            return _cmd_steps(args.pack_dir, args.variant)
         if args.command == "verify":
-            return _run(args.pack_dir, apply_fixes=False)
+            return _run(args.pack_dir, apply_fixes=False, variant=args.variant)
         if args.command == "remediate":
-            return _run(args.pack_dir, apply_fixes=True)
+            return _run(args.pack_dir, apply_fixes=True, variant=args.variant)
     except (PackValidationError, PackCompositionError, FileNotFoundError) as exc:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}, indent=2))
         return EXIT_BAD

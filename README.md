@@ -233,7 +233,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 58 tests, all green
+python -m pytest tests/ -q      # 68 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -241,6 +241,22 @@ python -m pytest tests/ -q      # 58 tests, all green
 ```bash
 python -m runner.cli remediate packs/memory
 ```
+
+**Local or hosted — your choice.** Some packs offer a `--variant`. The steps
+adapt to what you pick (and the fixes are tailored to it):
+
+```bash
+# gbrain: a local file, or hosted in the cloud
+python -m runner.cli remediate packs/gbrain-windows --variant local     # PGLite, no account
+python -m runner.cli remediate packs/gbrain-windows --variant supabase   # hosted, syncs machines
+
+# wiki: just on your machine, or also published free
+python -m runner.cli remediate packs/obsidian-wiki --variant local       # vault + memory link
+python -m runner.cli remediate packs/obsidian-wiki --variant hosted      # also published (Quartz)
+```
+
+`steps --variant <x>` shows exactly what that choice will run before you commit.
+Leave `--variant` off to use the pack's default (the simpler, no-account option).
 
 **Set up a free, publishable knowledge wiki** (Obsidian vault → Quartz → free host,
 linked into memory):
@@ -322,13 +338,15 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 ## Status & roadmap
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
-`modules:` composition, CLI, and the teach/verify/remediate skill — 58 tests green.
+`modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
+teach/verify/remediate skill — 68 tests green.
 
 Packs:
 - **memory** — set up a compounding memory + resolver index from scratch.
-- **gbrain-windows** — verify an existing tool is installed *and live*.
-- **obsidian-wiki** — set up an LLM wiki, publish it free (Quartz → Vercel/Pages),
-  and link it into memory (gbrain-ingestable). Part of the knowledge branch.
+- **gbrain-windows** — verify a tool is installed *and live*; choose **local**
+  (PGLite) or **supabase** (hosted).
+- **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)
+  or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
 - **foundation** — the umbrella; threads memory + gbrain through as modules.
 
 Setup golden paths pass on a real machine.

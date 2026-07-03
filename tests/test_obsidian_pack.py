@@ -76,9 +76,22 @@ def test_set_url_records_it(tmp_path):
     assert "example.test" in (tmp_path / "wiki" / ".publish_url").read_text(encoding="utf-8")
 
 
-def test_pack_loads_with_five_steps():
+def test_pack_loads_with_variants():
     pack = load_pack(REPO / "packs" / "obsidian-wiki" / "pack.yaml")
     assert pack.name == "obsidian-wiki"
+    assert pack.variants == ["local", "hosted"]
+    assert pack.default_variant == "local"
     assert [s.id for s in pack.steps] == [
-        "vault", "node-present", "memory-linked", "published-free", "gbrain-queryable",
+        "vault", "memory-linked", "node-present", "published-free", "gbrain-queryable",
     ]
+
+
+def test_local_variant_skips_publishing_steps():
+    from runner.verify import expand_steps  # noqa: PLC0415
+    pack = load_pack(REPO / "packs" / "obsidian-wiki" / "pack.yaml")
+    local_ids = [s["id"] for s in expand_steps(pack, variant="local")]
+    hosted_ids = [s["id"] for s in expand_steps(pack, variant="hosted")]
+    # local: no node/publish; hosted: includes them
+    assert "node-present" not in local_ids and "published-free" not in local_ids
+    assert "node-present" in hosted_ids and "published-free" in hosted_ids
+    assert "vault" in local_ids and "memory-linked" in local_ids  # shared

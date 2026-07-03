@@ -1,17 +1,24 @@
-# obsidian-wiki -- set up an Obsidian-style LLM wiki, publish it FREE, and make it
-# referenceable from memory (and queryable via gbrain).
+# obsidian-wiki -- set up an Obsidian-style LLM wiki, optionally publish it FREE,
+# and make it referenceable from memory (and queryable via gbrain).
 #
-# A wiki is a folder of linked markdown notes. It publishes for free with Quartz
-# (open-source) on a free host (Vercel Hobby / GitHub Pages) -- no paid Obsidian
-# Publish needed. Memory references it so Claude knows to consult it; gbrain can
-# ingest it for semantic search. Memory + gbrain go hand in hand here.
+# A wiki is a folder of linked markdown notes. Memory references it so Claude knows
+# to consult it; gbrain can ingest it for semantic search. Memory + gbrain go hand
+# in hand here.
+#
+# CHOICE -- pick how the wiki lives:
+#   --variant local    just on your machine: vault + memory link, nothing published (default)
+#   --variant hosted   also published free with Quartz -> Vercel Hobby / GitHub Pages
+# The vault, memory link, and gbrain steps run either way; only the publish steps
+# (which need Node + a free host) are hosted-only.
 #
 # Part of the KNOWLEDGE branch (see docs/skill-tree.md) -- not forced into the
 # foundation; you add it when you want a knowledge base.
 #
 # Commands run from the repo root.
 name: obsidian-wiki
-version: 0.1.0
+version: 0.2.0
+variants: [local, hosted]
+default_variant: local
 steps:
   - id: vault
     instruction: >
@@ -25,16 +32,6 @@ steps:
       No wiki found. Create it (idempotent):
       python packs/obsidian-wiki/files/setup_wiki.py
 
-  - id: node-present
-    instruction: >
-      Publishing uses Quartz, which needs Node.js. Confirm Node is installed.
-    check:
-      type: command_succeeds
-      cmd: node --version
-    on_fail: >
-      Node isn't installed (or not on PATH). Install it from https://nodejs.org
-      (LTS), open a NEW terminal, and run `node --version` again.
-
   - id: memory-linked
     instruction: >
       Point your memory index at the wiki, so Claude knows this knowledge base
@@ -47,7 +44,19 @@ steps:
       python packs/obsidian-wiki/files/setup_wiki.py --link-memory
       (If it says "no memory system found", run the memory pack first: packs/memory)
 
+  - id: node-present
+    when: hosted
+    instruction: >
+      Publishing uses Quartz, which needs Node.js. Confirm Node is installed.
+    check:
+      type: command_succeeds
+      cmd: node --version
+    on_fail: >
+      Node isn't installed (or not on PATH). Install it from https://nodejs.org
+      (LTS), open a NEW terminal, and run `node --version` again.
+
   - id: published-free
+    when: hosted
     instruction: >
       Publish the wiki to a free host so it's live on the web. The free route is
       Quartz -> Vercel Hobby (or GitHub Pages) -- see PUBLISHING.md in your vault.
@@ -66,7 +75,7 @@ steps:
     instruction: >
       The behavioural test: make the wiki LLM-queryable by ingesting it into gbrain,
       then confirm a query surfaces the wiki's canary phrase. This proves the wiki
-      is genuinely searchable, not just published. (Optional -- needs gbrain.)
+      is genuinely searchable, not just present. (Optional -- needs gbrain.)
     check:
       type: contains
       cmd: |

@@ -70,6 +70,24 @@ composition primitive, NOT new engine machinery. That keeps it cheap.
 - **Catalog trust.** Once packs come from many authors, the catalog is also the
   place provenance/signing surfaces (ties into the marketplace security gate).
 
+## Two levels of choice (one already shipped)
+
+There are really two choices in this system:
+
+1. **Which module** — the skill tree above (pick gbrain, pick obsidian, skip
+   trading). Not built yet.
+2. **How a module is set up** — a choice *inside* a pack. **This ships now** as
+   pack **variants**: a step tagged `when: <variant>` runs only for the chosen
+   variant, picked with `--variant`. Already live:
+   - `gbrain-windows` → `local` (PGLite file) vs `supabase` (hosted).
+   - `obsidian-wiki` → `local` (on disk) vs `hosted` (published free).
+
+Variants are the finer grain; the tree is the coarser one. When the chooser gets
+built, it selects modules (level 1) *and* their variants (level 2) — and since a
+module step can already pin a variant (`module: gbrain-windows` + `variant: supabase`),
+a rolled loadout captures both. The engine work for level 2 is done; the tree is
+the remaining piece.
+
 ## Why it's worth it
 
 It turns "set up your Claude" from a monolithic install into a **progression** — a

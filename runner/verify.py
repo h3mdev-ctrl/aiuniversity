@@ -84,6 +84,12 @@ class Step:
     module: Optional[str] = None  # ref to another pack, e.g. "gbrain-windows"
     on_fail: Optional[str] = None  # concrete prescribed fix; None -> stop on red
     teach: Optional[str] = None
+    # `when` gates a step to a chosen variant (e.g. local vs hosted). A step with
+    # no `when` always runs; a `when` step runs only for the active variant.
+    when: Optional[str] = None
+    # For a module step, `variant` picks which variant the sub-pack runs in
+    # (else the sub-pack's own default_variant).
+    variant: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,11 @@ class Pack:
     name: str
     version: str
     steps: "list[Step]"
+    # A pack may offer variants (e.g. ["local", "hosted"]) that the recipient
+    # chooses between; `when` on a step gates it to one. default_variant is used
+    # when the runner is given no explicit choice.
+    variants: "list[str]" = field(default_factory=list)
+    default_variant: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -137,6 +148,24 @@ def build_pack(data: dict) -> Pack:
     if not version or not isinstance(version, str):
         raise PackValidationError(f"pack {name!r} is missing a string `version`")
 
+    variants = data.get("variants") or []
+    if not isinstance(variants, list) or not all(isinstance(v, str) for v in variants):
+        raise PackValidationError(f"pack {name!r}: `variants` must be a list of strings")
+
+    default_variant = data.get("default_variant")
+    if variants:
+        if default_variant is None:
+            default_variant = variants[0]  # first declared variant is the default
+        elif default_variant not in variants:
+            raise PackValidationError(
+                f"pack {name!r}: default_variant {default_variant!r} is not in "
+                f"variants {variants}"
+            )
+    elif default_variant is not None:
+        raise PackValidationError(
+            f"pack {name!r}: default_variant set but no `variants` declared"
+        )
+
     raw_steps = data.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise PackValidationError(f"pack {name!r} must have a non-empty `steps` list")
@@ -144,7 +173,7 @@ def build_pack(data: dict) -> Pack:
     steps: list[Step] = []
     seen_ids: set[str] = set()
     for i, raw in enumerate(raw_steps):
-        step = _build_step(raw, index=i, pack_name=name)
+        step = _build_step(raw, index=i, pack_name=name, variants=variants)
         if step.id in seen_ids:
             raise PackValidationError(
                 f"pack {name!r}: duplicate step id {step.id!r}"
@@ -152,10 +181,16 @@ def build_pack(data: dict) -> Pack:
         seen_ids.add(step.id)
         steps.append(step)
 
-    return Pack(name=name, version=version, steps=steps)
+    return Pack(
+        name=name,
+        version=version,
+        steps=steps,
+        variants=variants,
+        default_variant=default_variant,
+    )
 
 
-def _build_step(raw: object, index: int, pack_name: str) -> Step:
+def _build_step(raw: object, index: int, pack_name: str, variants: "list[str]") -> Step:
     where = f"pack {pack_name!r} step #{index + 1}"
     if not isinstance(raw, dict):
         raise PackValidationError(f"{where}: each step must be a mapping")
@@ -167,6 +202,18 @@ def _build_step(raw: object, index: int, pack_name: str) -> Step:
     instruction = raw.get("instruction")
     if not instruction or not isinstance(instruction, str):
         raise PackValidationError(f"{where} ({step_id!r}): missing a string `instruction`")
+
+    # `when` gates a step to a variant; it must be one the pack declared.
+    when = raw.get("when")
+    if when is not None:
+        if not variants:
+            raise PackValidationError(
+                f"{where} ({step_id!r}): `when` set but the pack declares no `variants`"
+            )
+        if when not in variants:
+            raise PackValidationError(
+                f"{where} ({step_id!r}): `when: {when}` is not in variants {variants}"
+            )
 
     # A step is EITHER a check step or a module step -- exactly one.
     has_check = "check" in raw
@@ -188,6 +235,8 @@ def _build_step(raw: object, index: int, pack_name: str) -> Step:
             instruction=instruction,
             module=module_ref,
             teach=raw.get("teach"),
+            when=when,
+            variant=raw.get("variant"),
         )
 
     raw_check = raw.get("check")
@@ -202,6 +251,7 @@ def _build_step(raw: object, index: int, pack_name: str) -> Step:
         check=check,
         on_fail=raw.get("on_fail"),
         teach=raw.get("teach"),
+        when=when,
     )
 
 
@@ -276,11 +326,22 @@ def _run_check(check: Check, executor: Executor) -> "tuple[str, int]":
     return executor(check.cmd)
 
 
+def _active_variant(pack: Pack, variant: Optional[str]) -> Optional[str]:
+    """The variant in effect for this pack: explicit choice, else its default."""
+    return variant if variant is not None else pack.default_variant
+
+
+def _step_applies(step: Step, active_variant: Optional[str]) -> bool:
+    """A step runs if it has no `when`, or its `when` matches the active variant."""
+    return step.when is None or step.when == active_variant
+
+
 def run_pack(
     pack: Pack,
     executor: Executor = _shell_executor,
     resolver: Optional[PackResolver] = None,
     apply_fixes: bool = True,
+    variant: Optional[str] = None,
     _depth: int = 0,
     _id_prefix: str = "",
 ) -> RunResult:
@@ -304,8 +365,12 @@ def run_pack(
     pass only pack / executor / resolver / apply_fixes.
     """
     outcomes: list[StepOutcome] = []
+    active = _active_variant(pack, variant)
 
     for step in pack.steps:
+        if not _step_applies(step, active):
+            continue  # gated to a different variant -- skip
+
         if step.module is not None:
             sub_result = _run_module(step, executor, resolver, apply_fixes, _depth)
             outcomes.extend(sub_result.outcomes)  # already id-prefixed
@@ -364,6 +429,7 @@ def _run_module(
         executor,
         resolver,
         apply_fixes=apply_fixes,
+        variant=step.variant,  # module step may pin a variant; else sub-pack default
         _depth=depth + 1,
         _id_prefix=f"{step.module}/",
     )
@@ -372,16 +438,23 @@ def _run_module(
 def expand_steps(
     pack: Pack,
     resolver: Optional[PackResolver] = None,
+    variant: Optional[str] = None,
     _depth: int = 0,
     _id_prefix: str = "",
 ) -> "list[dict]":
     """Flatten a pack's steps into an ordered narration list for teach mode.
 
     Module steps expand into their sub-steps (id-prefixed), so teach walks the
-    full sequence a recipient will actually go through. Read-only: runs nothing.
+    full sequence a recipient will actually go through. Steps gated to a different
+    variant are skipped, so teach shows exactly what the chosen variant will run.
+    Read-only: runs nothing.
     """
     out: list[dict] = []
+    active = _active_variant(pack, variant)
     for step in pack.steps:
+        if not _step_applies(step, active):
+            continue
+
         if step.module is not None:
             if _depth >= 1:
                 raise PackCompositionError(
@@ -404,6 +477,7 @@ def expand_steps(
                 expand_steps(
                     resolver(step.module),
                     resolver,
+                    variant=step.variant,
                     _depth=_depth + 1,
                     _id_prefix=f"{step.module}/",
                 )

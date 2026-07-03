@@ -6,12 +6,19 @@
 # executable (gbrain / claude), so it works under cmd.exe -- the shell the runner
 # uses on Windows -- not just bash.
 #
+# CHOICE -- pick where your brain lives:
+#   --variant local     PGLite: a local file, no server, nothing to sign up for (default)
+#   --variant supabase  hosted on Supabase (Postgres in the cloud, syncs across machines)
+# The "is the brain reachable" check is the same either way; the variant only
+# changes the setup guidance you get if it isn't.
+#
 # Design note: we deliberately do NOT gate on `gbrain doctor`'s overall status.
 # On a working machine doctor can report "unhealthy" purely from content-sync
-# noise while gbrain is perfectly usable. The pack checks USABILITY, not a
-# health score (the presence-vs-behavioural rule).
+# noise while gbrain is perfectly usable. The pack checks USABILITY, not a score.
 name: gbrain-windows
-version: 0.1.0
+version: 0.2.0
+variants: [local, supabase]
+default_variant: local
 steps:
   - id: install
     instruction: >
@@ -26,20 +33,34 @@ steps:
       C:\Users\<you>\.bun\bin. Add that folder to PATH, open a NEW terminal, and
       run `gbrain --version` again.
 
-  - id: brain-reachable
+  - id: brain-reachable-local
+    when: local
     instruction: >
-      Prove gbrain can reach your brain database. This one check covers both
-      "is your config valid" and "does the database connect" -- because a bad
-      config or a wrong database URL both fail right here.
+      Your brain is a LOCAL file (PGLite) -- no server, nothing to sign up for.
+      Confirm gbrain can reach it. This covers "config valid" and "database
+      connects" in one check.
     check:
       type: command_succeeds
       cmd: gbrain list -n 1
     on_fail: >
-      gbrain can't reach the database. On Windows this is almost always the URL:
-      use the Supabase POOLER url (host like aws-0-...pooler.supabase.com:6543),
-      NOT the direct db.<project>.supabase.co host -- the direct host uses IPv6
-      and times out on most Windows networks. Re-run
-      `gbrain init --supabase --url <pooler-url>` with the pooler URL.
+      gbrain can't reach a local brain. Create one (no account needed):
+      gbrain init --pglite
+      Then re-run `gbrain list -n 1`.
+
+  - id: brain-reachable-supabase
+    when: supabase
+    instruction: >
+      Your brain is HOSTED on Supabase (syncs across machines). Confirm gbrain can
+      reach it. This covers "config valid" and "database connects" in one check.
+    check:
+      type: command_succeeds
+      cmd: gbrain list -n 1
+    on_fail: >
+      gbrain can't reach the Supabase brain. On Windows this is almost always the
+      URL: use the Supabase POOLER url (host like aws-0-...pooler.supabase.com:6543),
+      NOT the direct db.<project>.supabase.co host -- the direct host uses IPv6 and
+      times out on most Windows networks. Re-run:
+      gbrain init --supabase --url <pooler-url>
 
   - id: mcp-registered
     instruction: >
