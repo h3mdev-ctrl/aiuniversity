@@ -15,6 +15,11 @@
 # Design note: we deliberately do NOT gate on `gbrain doctor`'s overall status.
 # On a working machine doctor can report "unhealthy" purely from content-sync
 # noise while gbrain is perfectly usable. The pack checks USABILITY, not a score.
+#
+# HOW TO STRUCTURE YOUR BRAIN once it's live: see files/example_brain_filing.md
+# (slug conventions + a resolver-page filing map) and files/example_brain_page.md
+# (the shape of a good page). Modeled on a real, heavily-used brain -- copy the
+# structure, not the content.
 name: gbrain-windows
 version: 0.2.0
 variants: [local, supabase]

@@ -349,7 +349,10 @@ Packs:
   or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
 - **foundation** — the umbrella; threads memory + gbrain through as modules.
 
-Setup golden paths pass on a real machine.
+Every setup pack ships **worked examples modeled on a real, heavily-used system**
+(a mature memory index, a wiki filing guide + concept note + MOC, a brain filing
+map) — so a newcomer's Claude learns the structure by copying a proven one instead
+of inventing it. Setup golden paths pass on a real machine.
 
 Next, in order:
 - **A skill tree** — modules as a chooseable, RPG-style progression with

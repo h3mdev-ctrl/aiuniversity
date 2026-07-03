@@ -55,6 +55,11 @@ notes) that doubles as an LLM-queryable knowledge base.
 - [[getting-started]] -- how this wiki works
 - [[_template]] -- copy this to make a new note
 
+## Learn the structure (worked examples)
+- `_example_structure.md` -- how to file notes (folders, slugs, publish status)
+- `_example_concept.md` -- what a concept note looks like (frontmatter + One-liner)
+- `_example_moc.md` -- a Map of Content (index page that makes the vault navigable)
+
 Write notes as markdown, link them with [[double brackets]]. Publish for free with
 Quartz (see `PUBLISHING.md`). Query them by reading directly, or ingest into gbrain
 (`gbrain import` this folder).
@@ -141,6 +146,17 @@ def install() -> int:
     if not app.exists():
         app.write_text("{}\n", encoding="utf-8")
         wrote.append(".obsidian/app.json")
+
+    # Ship worked examples (a filing guide + a concept note + a Map of Content) so
+    # Claude has a concrete structure to copy. Prefixed "_" so Quartz/tools treat
+    # them as drafts, not published pages.
+    here = pathlib.Path(__file__).resolve().parent
+    for src in sorted(here.glob("example_*.md")):
+        dst = w / ("_" + src.name)
+        if not dst.exists():
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            wrote.append(dst.name)
+
     print(f"wiki home: {w}")
     print("created: " + (", ".join(wrote) if wrote else "(nothing -- already set up)"))
     return 0

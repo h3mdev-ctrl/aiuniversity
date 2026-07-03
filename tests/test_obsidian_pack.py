@@ -38,6 +38,19 @@ def test_vault_install_creates_files(tmp_path):
     assert (w / ".obsidian" / "app.json").exists()
 
 
+def test_install_ships_worked_examples(tmp_path):
+    run(WIKI, "setup_wiki.py", home=tmp_path)
+    w = tmp_path / "wiki"
+    for f in ("_example_structure.md", "_example_concept.md", "_example_moc.md"):
+        assert (w / f).exists(), f"missing {f}"
+
+
+def test_gbrain_ships_structure_examples():
+    files = REPO / "packs" / "gbrain-windows" / "files"
+    assert (files / "example_brain_filing.md").exists()
+    assert (files / "example_brain_page.md").exists()
+
+
 def test_check_red_then_green(tmp_path):
     assert run(WIKI, "setup_wiki.py", "--check", home=tmp_path).returncode == 1
     run(WIKI, "setup_wiki.py", home=tmp_path)
