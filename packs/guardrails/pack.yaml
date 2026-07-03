@@ -1,0 +1,50 @@
+# guardrails -- automatic backstops that catch mistakes by CODE, not by hoping.
+#
+# Layer 3 of the foundation. v1 ships one core guard: a PreToolUse hook that
+# blocks Claude from reading credential files (.env, private keys, .aws/
+# credentials, etc.) via Read OR Bash (cat/less/head/tail/type/Get-Content). The
+# behavioural check pipes a forbidden action through the INSTALLED hook and
+# confirms it exits non-zero -- so this pack proves the guard actually fires end
+# to end, not just that a file is present. Unlike memory's live recall probe,
+# this behavioural check is fully deterministic.
+#
+# Commands run from the repo root.
+name: guardrails
+version: 0.1.0
+steps:
+  - id: hook-installed
+    instruction: >
+      Install the credential guard hook script at ~/.claude/hooks/credential_guard.py.
+      This is the deterministic backstop -- it runs BEFORE Bash and Read tool calls
+      and refuses ones that would touch a credential file.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_guardrails.py --check-hook-file
+    on_fail: >
+      Hook file missing. Install it (idempotent):
+      python packs/guardrails/files/setup_guardrails.py
+
+  - id: registered-in-settings
+    instruction: >
+      Wire the hook into ~/.claude/settings.json as a PreToolUse guard on Bash+Read
+      so Claude Code actually runs it before those tools fire. Merges idempotently
+      with any hooks you already have.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_guardrails.py --check-registered
+    on_fail: >
+      Not registered in settings.json. Register it (safe merge):
+      python packs/guardrails/files/setup_guardrails.py
+
+  - id: guard-actually-blocks
+    instruction: >
+      THE behavioural check -- prove the guard fires. Pipes forbidden probes
+      (Read .env, `cat .env`, reading an SSH private key) through the installed
+      hook and confirms it exits non-zero with a BLOCKED message. Also checks a
+      harmless `ls` still passes, so it's a real gate, not a wall.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_guardrails.py --test-blocking
+    on_fail: >
+      The guard didn't block a known-forbidden action (see output). Reinstall:
+      python packs/guardrails/files/setup_guardrails.py

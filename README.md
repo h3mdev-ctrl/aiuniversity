@@ -148,8 +148,9 @@ gbrain) in as modules:
 4. **Durability** — is your `~/.claude/projects` folder there? (where per-project
    memory compounds)
 
-Identity (layer 0) is now built too — an interview pack that writes your context
-files and files a user_profile into memory. Guardrails is the remaining layer.
+Identity (layer 0) and Guardrails (layer 3) are now built too. Foundation now
+threads all five: memory → identity → constitution → guardrails → capabilities →
+durability.
 
 ### How it runs — a pack that contains packs
 
@@ -353,6 +354,9 @@ Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
   you; writes context files + a user_profile memory.
 - **memory** — set up a compounding memory + resolver index from scratch.
+- **guardrails** — layer 3: install a PreToolUse hook that blocks reads of
+  credential files (.env, private keys) and *proves* it fires by piping a
+  forbidden probe through the installed hook.
 - **gbrain-windows** — verify a tool is installed *and live*; choose **local**
   (PGLite) or **supabase** (hosted).
 - **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)

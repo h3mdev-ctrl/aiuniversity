@@ -39,6 +39,13 @@ steps:
       and any hard rules -- even a few lines beats nothing. It is the single file
       that stops Claude improvising against your setup.
 
+  - id: layer-3-guardrails
+    instruction: >
+      Automatic backstops that catch mistakes by CODE, not by hoping. Installs a
+      PreToolUse hook that blocks reading credential files (.env, private keys)
+      and proves it fires by piping a forbidden probe through it.
+    module: guardrails
+
   - id: layer-4-capabilities
     instruction: >
       Your capabilities: the tools Claude can actually use. This runs the gbrain
