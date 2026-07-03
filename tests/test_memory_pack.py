@@ -181,6 +181,44 @@ def test_doctor_healthy_on_fresh_install(tmp_path):
     assert "HEALTHY" in r.stdout
 
 
+def test_doctor_counts_index_and_catalog_reachability(tmp_path):
+    # a memory linked only from a Tier-2 INDEX_*.md (not MEMORY.md) is NOT dark
+    run("setup_memory.py", home=tmp_path)
+    mem = tmp_path / "memory"
+    (mem / "feedback_windows_quirk.md").write_text(
+        "---\nname: windows-quirk\ndescription: x\ntype: feedback\n---\nbody\n", encoding="utf-8"
+    )
+    # route it from a sub-index, the way the tiered structure prescribes
+    (mem / "INDEX_windows.md").write_text(
+        "# Windows quirks\n\n| ... | [feedback_windows_quirk](feedback_windows_quirk.md) |\n",
+        encoding="utf-8",
+    )
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0 and "HEALTHY" in r.stdout   # reachable via INDEX_, not dark
+
+
+def test_doctor_reachable_via_catalog(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    mem = tmp_path / "memory"
+    (mem / "reference_thing.md").write_text(
+        "---\nname: thing\ndescription: x\ntype: reference\n---\nbody\n", encoding="utf-8"
+    )
+    (mem / "CATALOG.md").write_text("# Catalog\n\n- reference_thing.md -- the thing\n", encoding="utf-8")
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0 and "HEALTHY" in r.stdout
+
+
+def test_doctor_ignores_index_and_catalog_as_memory_files(tmp_path):
+    # INDEX_*.md and CATALOG.md are routing files, not memories -- they must not
+    # be flagged for missing frontmatter or as dark.
+    run("setup_memory.py", home=tmp_path)
+    mem = tmp_path / "memory"
+    (mem / "INDEX_shipping.md").write_text("# Shipping routing (no frontmatter)\n", encoding="utf-8")
+    (mem / "CATALOG.md").write_text("# Catalog (no frontmatter)\n", encoding="utf-8")
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0 and "HEALTHY" in r.stdout
+
+
 def test_doctor_flags_a_dark_file(tmp_path):
     run("setup_memory.py", home=tmp_path)
     # a memory with valid frontmatter but not linked from MEMORY.md

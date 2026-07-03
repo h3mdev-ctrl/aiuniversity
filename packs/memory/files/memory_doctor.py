@@ -4,8 +4,11 @@ memory_doctor.py -- structural audit of a file-based memory system.
 
 Checks STRUCTURE, not content:
   1. MEMORY.md (the always-loaded index) exists.
-  2. No DARK files -- every memory file is reachable from MEMORY.md. A memory the
-     index can't route to is invisible in practice, even though it's on disk.
+  2. No DARK files -- every memory file is reachable from a ROUTING tier: the
+     always-loaded MEMORY.md, a Tier-2 INDEX_*.md sub-index, or CATALOG.md. A
+     memory nothing routes to is invisible in practice. (Splitting a domain into
+     an INDEX_*.md is the correct way to keep MEMORY.md small, so a file linked
+     only from a sub-index is reachable, NOT dark.)
   3. The index stays short (routing only) -- warn over the line budget.
   4. Every memory file has frontmatter: name, description, type.
 
@@ -52,11 +55,28 @@ def discover_memories() -> "list[pathlib.Path]":
 
 
 def is_memory_file(p: pathlib.Path) -> bool:
-    # A real memory entry is <type>_<topic>.md -- not the index, a template, or
-    # the doctor itself.
-    if p.name == "MEMORY.md" or p.name.startswith("_"):
+    # A real memory entry is <type>_<topic>.md -- not a ROUTING file (the index,
+    # a Tier-2 INDEX_*.md sub-index, or CATALOG.md), a template, or the doctor.
+    name = p.name
+    if name in ("MEMORY.md", "CATALOG.md") or name.startswith("_"):
+        return False
+    if name.startswith("INDEX_") and name.endswith(".md"):
         return False
     return p.suffix == ".md"
+
+
+def routing_text(m: pathlib.Path) -> str:
+    """Combined text of every routing tier a memory can be reached through:
+    the always-loaded MEMORY.md, any Tier-2 INDEX_*.md sub-index, and CATALOG.md.
+    A memory linked from ANY of these is reachable -- not dark."""
+    parts: list[str] = []
+    for name in ("MEMORY.md", "CATALOG.md"):
+        p = m / name
+        if p.exists():
+            parts.append(p.read_text(encoding="utf-8"))
+    for p in sorted(m.glob("INDEX_*.md")):
+        parts.append(p.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def has_frontmatter(text: str) -> bool:
@@ -90,15 +110,18 @@ def run() -> int:
     m = found[0]
     print(f"[found] auditing memory at {m}")
     index = m / "MEMORY.md"
-    index_text = index.read_text(encoding="utf-8")
+    index_text = index.read_text(encoding="utf-8")   # size budget: MEMORY.md only
+    reachable_via = routing_text(m)                  # reachability: all routing tiers
     issues: list[str] = []
 
     for p in sorted(m.glob("*.md")):
         if not is_memory_file(p):
             continue
-        # reachable? the slug or filename must appear somewhere in the index.
-        if p.stem not in index_text and p.name not in index_text:
-            issues.append(f"[dark] {p.name} is not linked from MEMORY.md (unreachable)")
+        # reachable? the slug/filename must appear in ANY routing tier -- MEMORY.md,
+        # a Tier-2 INDEX_*.md, or CATALOG.md. (Splitting a domain into a sub-index
+        # is the CORRECT way to keep MEMORY.md small; it must not read as "dark".)
+        if p.stem not in reachable_via and p.name not in reachable_via:
+            issues.append(f"[dark] {p.name} is not linked from MEMORY.md / any INDEX_*.md / CATALOG.md (unreachable)")
         if not has_frontmatter(p.read_text(encoding="utf-8")):
             issues.append(f"[frontmatter] {p.name} missing name/description/type frontmatter")
 
