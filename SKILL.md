@@ -134,6 +134,17 @@ versus what to skip. Do not reflect from scratch -- the workflow is there so you
 don't have to. Pipe your JSON to `--write-learning`, then `--clear-queue`, then
 run `memory_doctor.py` and confirm `VERDICT: HEALTHY`.
 
+### Keep it active in long sessions -- drain on COMMIT cadence, not session-end
+
+Long sessions often never formally "end", so don't wait for a wrap-up to learn.
+**After you commit** in a repo with autolearn installed, run
+`phantom_autolearn.py --drain-due`. If it says `DRAIN DUE` (queue depth past the
+threshold, default 5), reflect on the queued commits NOW and file the durable
+lessons -- same procedure as above. This ties learning to the thing that happens
+often (commits) instead of the thing that rarely happens (a clean session close).
+Cheap: most checks say "not yet" and cost nothing; you only reflect when enough
+has accumulated to be worth it.
+
 ## Interview steps (e.g. the identity pack)
 
 Some steps need answers only the user has (their name, how they want you to talk

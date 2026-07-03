@@ -4,6 +4,15 @@
 > and `--write-learning`), follow this. It is the concrete procedure so you never
 > have to derive one. Six stages, each with concrete questions and a worked example.
 
+## When to run this (cadence, not session-end)
+
+Don't wait for a session to "end" -- long sessions often never do. Run this on
+**commit cadence**: after a commit, check `phantom_autolearn.py --drain-due`. If a
+drain is DUE (queue depth past the threshold, default 5), reflect now. Between
+sessions, a scheduled `--nudge` (see `scheduled_nudge.md`) reminds you when the
+queue has piled up. Either way, a human/Claude does the actual reflection -- the
+tool never writes memory unattended.
+
 ## The one rule
 
 **A durable lesson beats no lesson beats a trivial lesson.** Better to mark

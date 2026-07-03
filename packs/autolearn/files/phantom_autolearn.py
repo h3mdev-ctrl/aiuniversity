@@ -42,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def base_dir() -> pathlib.Path:
@@ -50,6 +51,41 @@ def base_dir() -> pathlib.Path:
 
 def queue_path() -> pathlib.Path:
     return base_dir() / "autolearn_queue.jsonl"
+
+
+def last_drain_path() -> pathlib.Path:
+    return base_dir() / ".autolearn_last_drain"
+
+
+def _drain_threshold() -> int:
+    try:
+        return max(1, int(os.environ.get("AUTOLEARN_DRAIN_THRESHOLD", "5")))
+    except ValueError:
+        return 5
+
+
+def _nudge_stale_minutes() -> int:
+    try:
+        return max(1, int(os.environ.get("AUTOLEARN_NUDGE_STALE_MINUTES", "120")))
+    except ValueError:
+        return 120
+
+
+def _stamp_drain() -> None:
+    try:
+        last_drain_path().write_text(str(int(time.time())), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _minutes_since_last_drain() -> "float | None":
+    p = last_drain_path()
+    if not p.exists():
+        return None
+    try:
+        return (time.time() - int(p.read_text(encoding="utf-8").strip())) / 60.0
+    except (ValueError, OSError):
+        return None
 
 
 # --- memory discovery (mirror of the memory pack -- self-contained on purpose) --
@@ -166,7 +202,48 @@ def clear_queue() -> int:
     q = queue_path()
     if q.exists():
         q.unlink()
+    _stamp_drain()
     print("queue cleared")
+    return 0
+
+
+def queue_depth() -> int:
+    n = len(_read_queue())
+    print(f"queue depth: {n}")
+    return 0
+
+
+def drain_due() -> int:
+    """Exit 0 if a drain is DUE (queue depth >= threshold), else 1.
+
+    The in-session cadence trigger: check this after a commit -- if due, reflect
+    on the queue NOW rather than waiting for a session end that may never come.
+    """
+    n = len(_read_queue())
+    t = _drain_threshold()
+    due = n >= t
+    print(f"queue depth {n} / threshold {t}: {'DRAIN DUE' if due else 'not yet'}")
+    return 0 if due else 1
+
+
+def nudge() -> int:
+    """For a scheduled task: print a nudge (exit 0) when a drain is due AND the
+    queue has gone stale; else exit 1 (nothing to say). Never writes memory --
+    it only reminds a human/Claude to run the drain, so it stays in the loop.
+    """
+    n = len(_read_queue())
+    t = _drain_threshold()
+    if n < t:
+        return 1
+    mins = _minutes_since_last_drain()
+    stale = mins is None or mins >= _nudge_stale_minutes()
+    if not stale:
+        return 1
+    print(
+        f"autolearn: {n} commit(s) queued and undrained"
+        + (f" for ~{int(mins)} min" if mins is not None else "")
+        + " -- worth a wrap-up reflection (--show-queue, then --write-learning)."
+    )
     return 0
 
 
@@ -264,6 +341,7 @@ def drain() -> int:
             write_learning_to(mem, learning)
             written += 1
     queue_path().unlink(missing_ok=True)
+    _stamp_drain()
     print(f"drained {len(entries)} commit(s), filed {written} learning(s) into {mem}")
     return 0
 
@@ -331,6 +409,9 @@ def main(argv: list[str]) -> int:
         "--check-workflow": check_workflow,
         "--capture": capture,
         "--show-queue": show_queue,
+        "--queue-depth": queue_depth,
+        "--drain-due": drain_due,
+        "--nudge": nudge,
         "--write-learning": write_learning,
         "--clear-queue": clear_queue,
         "--drain": drain,

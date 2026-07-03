@@ -139,6 +139,53 @@ def test_selftest_passes(tmp_path):
     assert run("--selftest", home=tmp_path).returncode == 0
 
 
+def _queue_n(tmp_path, n: int):
+    q = tmp_path / "autolearn_queue.jsonl"
+    q.write_text("".join(json.dumps({"sha": str(i), "subject": f"c{i}"}) + "\n" for i in range(n)),
+                 encoding="utf-8")
+
+
+def test_drain_due_false_below_threshold_true_at(tmp_path):
+    _queue_n(tmp_path, 4)  # default threshold 5
+    assert run("--drain-due", home=tmp_path).returncode == 1
+    _queue_n(tmp_path, 5)
+    assert run("--drain-due", home=tmp_path).returncode == 0
+
+
+def test_drain_due_respects_env_threshold(tmp_path):
+    _queue_n(tmp_path, 2)
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path), AUTOLEARN_DRAIN_THRESHOLD="2")
+    r = subprocess.run([sys.executable, str(SCRIPT), "--drain-due"],
+                       capture_output=True, text=True, env=env, encoding="utf-8")
+    assert r.returncode == 0
+
+
+def test_queue_depth_reports_count(tmp_path):
+    _queue_n(tmp_path, 3)
+    r = run("--queue-depth", home=tmp_path)
+    assert r.returncode == 0 and "queue depth: 3" in r.stdout
+
+
+def test_nudge_silent_below_threshold(tmp_path):
+    _queue_n(tmp_path, 2)
+    r = run("--nudge", home=tmp_path)
+    assert r.returncode == 1 and r.stdout.strip() == ""
+
+
+def test_nudge_fires_when_deep_and_stale(tmp_path):
+    _queue_n(tmp_path, 6)   # >= threshold, no last-drain stamp -> stale
+    r = run("--nudge", home=tmp_path)
+    assert r.returncode == 0 and "queued" in r.stdout
+
+
+def test_nudge_silent_right_after_a_drain(tmp_path):
+    _queue_n(tmp_path, 6)
+    run("--clear-queue", home=tmp_path)   # stamps last-drain = now
+    _queue_n(tmp_path, 6)                  # queue deep again immediately
+    r = run("--nudge", home=tmp_path)      # but not stale -> stay quiet
+    assert r.returncode == 1
+
+
 def test_install_workflow_ships_the_guide(tmp_path):
     setup_memory(tmp_path)
     r = run("--install-workflow", home=tmp_path)
