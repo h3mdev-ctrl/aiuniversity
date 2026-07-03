@@ -233,13 +233,20 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 51 tests, all green
+python -m pytest tests/ -q      # 58 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
 
 ```bash
 python -m runner.cli remediate packs/memory
+```
+
+**Set up a free, publishable knowledge wiki** (Obsidian vault → Quartz → free host,
+linked into memory):
+
+```bash
+python -m runner.cli remediate packs/obsidian-wiki
 ```
 
 ---
@@ -294,7 +301,8 @@ aiuniversity/
     foundation/         the umbrella: pulls in the memory + gbrain packs as modules
     memory/             sets up a compounding memory + always-loaded resolver index
     gbrain-windows/     gbrain set up + proven live on Windows
-  tests/                51 tests
+    obsidian-wiki/      a free-publishable LLM wiki, linked into memory
+  tests/                58 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -313,24 +321,28 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 ## Status & roadmap
 
-**v1 engine + three packs: complete.** Matcher, runner, escape hatch, validation,
-`modules:` composition, CLI, and the teach/verify/remediate skill — 51 tests
-green. Packs: **gbrain-windows** (verify an existing tool) and **memory** (set up
-a compounding memory + resolver index from scratch), both threaded through the
-**foundation** umbrella. Setup golden paths pass on a real machine.
+**v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
+`modules:` composition, CLI, and the teach/verify/remediate skill — 58 tests green.
+
+Packs:
+- **memory** — set up a compounding memory + resolver index from scratch.
+- **gbrain-windows** — verify an existing tool is installed *and live*.
+- **obsidian-wiki** — set up an LLM wiki, publish it free (Quartz → Vercel/Pages),
+  and link it into memory (gbrain-ingestable). Part of the knowledge branch.
+- **foundation** — the umbrella; threads memory + gbrain through as modules.
+
+Setup golden paths pass on a real machine.
 
 Next, in order:
-- **The Obsidian LLM-wiki module** — an LLM-queryable knowledge base; adding it
-  should be mostly *filling in a `pack.yaml`*.
 - **A skill tree** — modules as a chooseable, RPG-style progression with
   prerequisites and branches, instead of a hard-coded foundation. Captured in
   [`docs/skill-tree.md`](docs/skill-tree.md); a presentation layer over the
   `modules:` primitive, not new engine machinery.
 - **Hand it to a friend.** Zero-help setup = the wedge is proven. This is the real
   test; everything so far just makes it possible.
-- **The live recall probe end-to-end** — memory's behavioural `recall-probe` step
-  spawns a real `claude -p`; wire the recipient's fresh-session check into the
-  golden path (today it's the one live step, unit-tested but run by hand).
+- **Live behavioural probes end-to-end** — memory's `recall-probe` and the wiki's
+  `gbrain-queryable` step each spawn a real tool call; today they're the one live
+  step per pack (unit-tested, run by hand).
 - **Per-OS `cmd:` variants** in `pack.yaml` (the runner uses cmd.exe on Windows;
   bash-only checks need per-OS forms).
 - **Before any public/third-party marketplace:** pack signing + "review before you
