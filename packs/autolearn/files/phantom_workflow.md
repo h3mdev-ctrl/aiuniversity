@@ -137,6 +137,56 @@ the next drain re-processes them.
 
 ---
 
+## The unattended drain -- an action PLAN, not just "create" (models global-evolution)
+
+The 6 stages above are the **interactive** path: a Claude in a live session
+reflects on one commit and pipes a single `create` to `--write-learning`. That's
+great for "I just learned this, file it now."
+
+For the **unattended** path (`--drain`, run headless on a cadence), we model a more
+capable design borrowed from a mature, proven system (Andrew's `global-evolution`
+drain). Instead of only ever *creating*, the drain reflects over the WHOLE queue at
+once, is shown the EXISTING memory (routing index + every slug), and returns a
+**plan of actions**:
+
+- **create** -- a genuinely new lesson (slug must not already exist)
+- **update** -- refines an existing memory; returns its FULL new content
+- **supersede** -- an existing memory is stale/wrong; stamp it (in place, never
+  deleted) with a banner + `status: superseded` frontmatter, optionally pointing to
+  its replacement
+- **skip** -- nothing durable
+
+Why this matters: a create-only drain slowly fills memory with near-duplicates and
+never retires anything stale. Giving the model the existing memory + update/supersede
+lets the memory **evolve** -- the same discipline you'd apply by hand.
+
+What keeps it safe (the same "no model is trusted" principle):
+
+- **`validate_plan` is a deterministic gate** over every action -- slug shape,
+  create-not-existing, update-must-exist, supersede rules, no credentials, size
+  caps, balanced fences. A single HARD finding blocks the WHOLE drain; the queue is
+  kept, nothing is written. Model-free, exactly like `validate_learning`.
+- **`--tools=""`** on the headless call -- the model can only emit text, never touch
+  the filesystem. Python applies the validated plan. That's the safety boundary.
+- **clobber-guard on `update`** -- the model never saw the file's current body, so an
+  `update` that is both much shorter AND drops most of the old substantive lines is
+  refused (original kept). A genuine extension passes.
+- **index growth -> CATALOG.md** (on-demand), never the always-loaded MEMORY.md; a
+  safety net guarantees every created file is routable so the doctor never goes dark.
+- **one git commit per drain** -> a bad autonomous write is `git revert HEAD`.
+
+Run it (needs the `claude` CLI + a cheap model; ~cents-equivalent, or plan quota):
+
+```
+AUTOLEARN_DRAIN_MODEL=claude-haiku-4-5 python packs/autolearn/files/phantom_autolearn.py --drain
+```
+
+A one-shot structured reflection doesn't need a top-tier model -- Haiku is the right
+draw. See `windows_gotchas.md` if you're on Windows (npm `.cmd` shim, Task Scheduler
+PATH, etc.).
+
+---
+
 ## Worked examples
 
 ### Example A -- durable feedback (SHOULD WRITE)

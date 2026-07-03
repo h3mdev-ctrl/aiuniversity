@@ -41,22 +41,37 @@ Modes:
     --show-queue       print the queued commits as JSON (for Claude to reflect on)
     --write-learning   read ONE learning JSON on stdin, file it into memory
     --clear-queue      empty the queue
-    --drain            reflect on the queue headless via `claude -p`, then clear it
+    --drain            reflect on the whole queue headless via `claude -p` and apply
+                       an ACTION PLAN (create/update/supersede) to memory, then clear
     --selftest         prove the write->memory->doctor path works (isolated), exit 0/1
 
 Queue: <base>/autolearn_queue.jsonl (base = $CLAUDE_HOME or ~/.claude).
 Learnings are filed into the DISCOVERED memory (global or project-scoped); if more
 than one memory exists it refuses to guess -- pin CLAUDE_MEMORY_HOME.
 
-Learning JSON (for --write-learning / what --drain expects back from claude):
+Learning JSON (for the interactive --write-learning path):
     {"should_write": true, "type": "feedback"|"reference", "name": "kebab-slug",
      "description": "when you're about to ...", "body": "the lesson",
      "resolver_intent": "when you're about to ..."}
+
+Action PLAN (what the unattended --drain asks the model for -- models Andrew's
+global-evolution drain: the model sees the EXISTING memory and can create a new
+file, UPDATE a close one, or SUPERSEDE a stale one, so lessons evolve instead of
+piling up near-dupes):
+    {"actions": [
+       {"type":"create","slug":"feedback_x.md","frontmatter":{...},"body":"..."},
+       {"type":"update","slug":"feedback_y.md","new_full_content":"...full file..."},
+       {"type":"supersede","slug":"feedback_z.md","reason":"...","superseded_by":"feedback_x.md"},
+       {"type":"skip"}],
+     "catalog_additions": ["- feedback_x.md -- hook"]}
+Every action is validated deterministically before ANY write; the whole drain is
+one revertible git commit.
 """
 import json
 import os
 import pathlib
 import shutil
+from datetime import datetime, timezone
 import subprocess
 import sys
 import tempfile
@@ -442,23 +457,43 @@ def validate() -> int:
     return 4 if any(sev == "HARD" for sev, _ in issues) else 0
 
 
-# --- unattended reflection (headless) ---------------------------------------
+# --- unattended reflection: an ACTION PLAN (models global-evolution) ---------
+# Instead of one create-only learning per commit, the drain asks the model for a
+# PLAN over the WHOLE queue at once, GIVEN the existing memory: create a new file,
+# UPDATE a close one, or SUPERSEDE a stale one -- so lessons dedup and evolve
+# rather than piling up near-duplicates. Ported from Andrew's global-evolution
+# drain. Every action is validated deterministically before any write; index
+# growth lands in CATALOG.md (on-demand), never the always-loaded MEMORY.md.
 
-REFLECT_PROMPT = (
-    "You are doing a wrap-up reflection (a 'phantom' close-out) on a git commit. "
-    "From the commit below, extract AT MOST ONE durable, reusable lesson worth "
-    "remembering across future sessions -- a behaviour rule, a gotcha, or where an "
-    "answer lives. Skip trivial or one-off changes. Respond with ONLY JSON: "
-    '{"should_write": bool, "type": "feedback"|"reference", "name": "kebab-slug", '
-    '"description": "when you\'re about to ...", "body": "the lesson", '
-    '"resolver_intent": "when you\'re about to ..."}. '
-    'If nothing is durable, {"should_write": false}.\n\nCOMMIT:\n'
-)
+MAX_PLAN_BODY_LINES = 150
+MAX_CATALOG_ADDITIONS = 4
+_VALID_TYPES = ("feedback", "reference", "project", "user")
+_SLUG_RE = _re.compile(r"^[a-z0-9][a-z0-9_\-]*\.md$")
+
+PLAN_PROMPT = """You are doing a wrap-up reflection (a 'phantom' close-out) over a BATCH of git commits, deciding how to evolve a file-based memory system so the same mistakes aren't repeated.
+
+You are given: (1) the routing index (MEMORY.md), (2) the list of EXISTING memory slugs, (3) the commits. Extract only DURABLE, reusable lessons -- behaviour rules, gotchas, where-an-answer-lives. Skip trivial or one-off changes. Prefer FEW high-signal memories over many. A durable lesson beats no lesson beats a trivial one.
+
+For each lesson choose ONE action:
+- create   : a genuinely NEW lesson (slug must NOT already exist)
+- update   : refines an EXISTING memory -> return its FULL new content (don't drop what's already there)
+- supersede: an existing memory is now stale/wrong -> mark it, optionally point to a replacement
+- skip     : nothing durable here
+
+Respond with ONLY this JSON (no prose, no code fence):
+{"actions":[
+  {"type":"create","slug":"feedback_x.md","frontmatter":{"name":"x","description":"when you're about to ...","type":"feedback"},"body":"the lesson (<=150 lines)"},
+  {"type":"update","slug":"feedback_y.md","new_full_content":"---\\nname: y\\ndescription: ...\\ntype: feedback\\n---\\n\\n...full file..."},
+  {"type":"supersede","slug":"feedback_stale.md","reason":"why it's stale","superseded_by":"feedback_x.md"},
+  {"type":"skip"}
+],"catalog_additions":["- feedback_x.md -- one-line hook"]}
+
+Rules: slug is <type>_<kebab>.md ; type in feedback|reference|project|user ; NEVER put a credential/secret/.env value in any field ; index growth goes ONLY in catalog_additions (<=4 lines) -- never edit the routing index yourself."""
 
 
-# A test/dry-run seam: point $AUTOLEARN_FAKE_REFLECT at a JSON list of learning
-# dicts and the reflector returns them in order instead of calling `claude -p`.
-# Lets the gate + commit path be exercised deterministically with no live model.
+# A test/dry-run seam: point $AUTOLEARN_FAKE_REFLECT at a JSON PLAN object (or a
+# list whose first element is the plan) and the reflector returns it instead of
+# calling `claude -p`. Lets the validate + apply + commit path run with no model.
 _FAKE_REFLECT_ENV = "AUTOLEARN_FAKE_REFLECT"
 _fake_iter = None
 
@@ -471,45 +506,294 @@ def _next_fake(path: str) -> "dict | None":
     return next(_fake_iter, None)
 
 
-def _reflect(entry: dict, model: str) -> "dict | None":
-    """Turn one queued commit into a candidate learning dict (or None if the model
-    errored / returned nothing parseable)."""
-    fake = os.environ.get(_FAKE_REFLECT_ENV)
-    if fake:
-        return _next_fake(fake)
-    # Resolve the CLI via shutil.which -- on Windows `claude` is an npm `.cmd`
-    # shim and bare subprocess.run(["claude", ...]) can't find it (CreateProcess
-    # doesn't apply PATHEXT). The full path (claude.CMD) launches fine.
-    exe = shutil.which("claude")
-    if not exe:
-        return None  # no claude CLI on PATH -- can't reflect headlessly
-    # Feed the prompt on STDIN, not as an argv element: a .cmd re-parses its args
-    # through cmd.exe, which would mangle a multi-line, brace/quote-laden prompt.
-    prompt = REFLECT_PROMPT + f"{entry.get('subject','')}\n{entry.get('body','')}\n{entry.get('stat','')}"
-    r = subprocess.run([exe, "-p", "--model", model], input=prompt, capture_output=True, text=True)
-    if r.returncode != 0:
+def _extract_json_object(text: str) -> "dict | None":
+    s = (text or "").strip()
+    i, j = s.find("{"), s.rfind("}")
+    if i == -1 or j == -1 or j < i:
         return None
-    out = r.stdout.strip()
     try:
-        return json.loads(out[out.find("{"): out.rfind("}") + 1])
+        return json.loads(s[i:j + 1])
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-def _commit_drain(mem: pathlib.Path, filed: "list[str]") -> "str | None":
-    """Commit the drained learnings + the MEMORY.md resolver update into the memory
-    folder's git repo, so a bad unattended write is a one-command `git revert`.
-    No-op (returns None) if the folder isn't a git work tree or nothing was filed."""
-    if not filed:
+def _is_memory_filename(name: str) -> bool:
+    if name in ("MEMORY.md", "CATALOG.md") or name.startswith("_"):
+        return False
+    if name.startswith("INDEX_") and name.endswith(".md"):
+        return False
+    return name.endswith(".md")
+
+
+def _existing_slugs(mem: pathlib.Path) -> "list[str]":
+    return sorted(p.name for p in mem.glob("*.md") if _is_memory_filename(p.name))
+
+
+def _plan_reflect(entries: "list[dict]", mem: pathlib.Path, model: str) -> "dict | None":
+    """Ask the model for ONE action-plan over the whole queue (or None on failure)."""
+    fake = os.environ.get(_FAKE_REFLECT_ENV)
+    if fake:
+        return _next_fake(fake)
+    # Resolve the CLI via shutil.which -- on Windows `claude` is an npm `.cmd` shim
+    # and bare subprocess.run(["claude", ...]) can't find it (no PATHEXT).
+    exe = shutil.which("claude")
+    if not exe:
+        return None
+    routing = (mem / "MEMORY.md").read_text(encoding="utf-8") if (mem / "MEMORY.md").exists() else ""
+    commits = "\n\n".join(
+        f"### {e.get('subject','')}\n{e.get('body','')}\n{e.get('stat','')}" for e in entries
+    )
+    prompt = (
+        PLAN_PROMPT
+        + "\n\n## Routing index (MEMORY.md)\n" + routing[:6000]
+        + "\n\n## Existing memory slugs\n" + "\n".join(_existing_slugs(mem))
+        + "\n\n## Commits to reflect on\n" + commits
+    )
+    # --tools="" so the model can ONLY emit text -- it cannot touch the filesystem;
+    # Python applies the validated plan. That model/filesystem boundary is the
+    # safety line. Prompt goes on STDIN (a .cmd would mangle it as an argv string).
+    r = subprocess.run(
+        [exe, "-p", "--model", model, "--tools", ""], input=prompt, capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        return None
+    return _extract_json_object(r.stdout)
+
+
+# --- deterministic plan validation (port of global-evolution's invariants) ---
+
+
+def _check_slug(slug: str) -> "list[str]":
+    errs: list[str] = []
+    if not _SLUG_RE.match(slug or ""):
+        errs.append(f"slug {slug!r} invalid (must be <type>_<kebab>.md, lowercase)")
+    if ".." in (slug or "") or "/" in (slug or "") or "\\" in (slug or ""):
+        errs.append(f"slug {slug!r} contains path traversal")
+    return errs
+
+
+def _check_body(body: str) -> "list[str]":
+    errs: list[str] = []
+    if _CRED_RE.search(body or ""):
+        errs.append("body looks like it contains a credential/secret -- refusing")
+    n = len((body or "").splitlines())
+    if n > MAX_PLAN_BODY_LINES:
+        errs.append(f"body has {n} lines, max {MAX_PLAN_BODY_LINES}")
+    if (body or "").count("```") % 2 != 0:
+        errs.append("unbalanced ``` code fences")
+    return errs
+
+
+def _check_frontmatter(fm: dict) -> "list[str]":
+    if not isinstance(fm, dict):
+        return ["frontmatter is not an object"]
+    errs = [f"frontmatter missing {k}" for k in ("name", "description", "type") if not fm.get(k)]
+    if fm.get("type") not in _VALID_TYPES:
+        errs.append(f"frontmatter type {fm.get('type')!r} invalid (feedback|reference|project|user)")
+    return errs
+
+
+def validate_plan(plan: dict, existing_slugs: "list[str]") -> "list[str]":
+    """Deterministic gate over the whole plan. Returns [] if every action is safe
+    to apply, else a list of reasons. Pure, model-free -- the safety floor for an
+    unattended drain, exactly like validate_learning is for --write-learning."""
+    if not isinstance(plan, dict):
+        return ["plan is not a JSON object"]
+    actions = plan.get("actions", [])
+    if not isinstance(actions, list):
+        return ["actions is not a list"]
+    errors: list[str] = []
+    adds = plan.get("catalog_additions", [])
+    if not isinstance(adds, list):
+        errors.append("catalog_additions is not a list")
+    elif len(adds) > MAX_CATALOG_ADDITIONS:
+        errors.append(f"catalog_additions has {len(adds)}, max {MAX_CATALOG_ADDITIONS}")
+
+    existing_lower = {s.lower() for s in existing_slugs}
+    created_lower = {a.get("slug", "").lower() for a in actions if a.get("type") == "create"}
+    seen: set = set()
+    for a in actions:
+        t = a.get("type")
+        if t == "create":
+            slug = a.get("slug", "")
+            errors += _check_slug(slug)
+            if slug.lower() in existing_lower:
+                errors.append(f"create slug {slug!r} already exists -- use update")
+            if slug.lower() in seen:
+                errors.append(f"duplicate create slug {slug!r} in the same plan")
+            seen.add(slug.lower())
+            errors += _check_body(a.get("body", ""))
+            errors += _check_frontmatter(a.get("frontmatter", {}))
+        elif t == "update":
+            slug = a.get("slug", "")
+            errors += _check_slug(slug)
+            if slug.lower() not in existing_lower:
+                errors.append(f"update slug {slug!r} does not exist -- use create")
+            errors += _check_body(a.get("new_full_content", ""))
+        elif t == "supersede":
+            slug = a.get("slug", "")
+            errors += _check_slug(slug)
+            if slug.lower() not in existing_lower:
+                errors.append(f"supersede slug {slug!r} does not exist")
+            if not (a.get("reason", "") or "").strip():
+                errors.append(f"supersede {slug!r} missing a reason")
+            sb = a.get("superseded_by", "")
+            if sb:
+                errors += _check_slug(sb)
+                if sb.lower() not in existing_lower and sb.lower() not in created_lower:
+                    errors.append(f"supersede superseded_by {sb!r} neither exists nor is created here")
+        elif t == "skip":
+            pass
+        else:
+            errors.append(f"unknown action type {t!r}")
+    return errors
+
+
+# --- apply a validated plan (port of global-evolution's apply layer) ---------
+
+_BANNER_MARK = "<!-- superseded-banner -->"
+_SUPERSEDE_KEYS = ("status", "superseded_at", "superseded_by", "supersede_reason")
+
+
+def _split_frontmatter(content: str) -> "tuple[list[str], str]":
+    if not content.startswith("---\n"):
+        return [], content
+    rest = content[4:]
+    end = rest.find("\n---\n")
+    if end == -1:
+        return [], content
+    return rest[:end].split("\n"), rest[end + 5:]
+
+
+def _apply_supersede(mem: pathlib.Path, slug: str, superseded_by: str, reason: str) -> str:
+    """Stamp a memory file as superseded IN PLACE (never deletes). Idempotent."""
+    path = mem / slug
+    content = path.read_text(encoding="utf-8")
+    fm_lines, body = _split_frontmatter(content)
+    fm_lines = [ln for ln in fm_lines if ln.split(":", 1)[0].strip() not in _SUPERSEDE_KEYS]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fm_lines += [
+        "status: superseded",
+        f"superseded_at: {ts}",
+        f"superseded_by: {superseded_by}",
+        f"supersede_reason: {json.dumps(reason)}",
+    ]
+    if _BANNER_MARK in body:
+        body = body.split(_BANNER_MARK, 1)[1].lstrip("\n")
+    ref = f" See [[{superseded_by[:-3]}]]." if superseded_by.endswith(".md") else ""
+    banner = f"> [SUPERSEDED {ts[:10]}] {reason}{ref}\n{_BANNER_MARK}\n\n"
+    new = "---\n" + "\n".join(fm_lines) + "\n---\n\n" + banner + body
+    if not new.endswith("\n"):
+        new += "\n"
+    path.write_text(new, encoding="utf-8")
+    return f"superseded {slug}" + (f" (by {superseded_by})" if superseded_by else "")
+
+
+def _update_drops_content(old: str, new: str) -> bool:
+    """Guard: an `update` blind-writes the model's new_full_content, but the model
+    never saw the file's current BODY (only the routing index + slugs). So a drain
+    that 'remembers' an old version can clobber content added since. Return True
+    (=> SKIP, keep original) only on the clear clobber signature: the new content is
+    BOTH much shorter AND loses most of the old file's substantive lines. A genuine
+    extension keeps the old lines or grows the file, so it always passes."""
+    def sig(t: str) -> set:
+        out = set()
+        for ln in t.splitlines():
+            s = ln.strip()
+            if len(s) >= 20 and not s.startswith(("---", ">", "#", "name:", "description:", "type:", "kind:")):
+                out.add(s)
+        return out
+    old_sig = sig(old)
+    if not old_sig:
+        return False
+    retained = len(old_sig & sig(new)) / len(old_sig)
+    return len(new) < 0.5 * len(old) and retained < 0.5
+
+
+def apply_plan(mem: pathlib.Path, plan: dict) -> "list[str]":
+    """Apply a plan already passed by validate_plan. Returns human-readable changes."""
+    changes: list[str] = []
+    for a in plan.get("actions", []):
+        t = a.get("type")
+        if t == "create":
+            slug = a["slug"]
+            fm = a["frontmatter"]
+            fm_yaml = "\n".join(f"{k}: {v}" for k, v in fm.items())
+            (mem / slug).write_text(f"---\n{fm_yaml}\n---\n\n{a.get('body','').rstrip()}\n", encoding="utf-8")
+            changes.append(f"created {slug}")
+        elif t == "update":
+            slug = a["slug"]
+            new = a.get("new_full_content", "")
+            path = mem / slug
+            old = path.read_text(encoding="utf-8") if path.exists() else ""
+            if _update_drops_content(old, new):
+                changes.append(f"SKIPPED update {slug} -- would drop existing content (kept original)")
+                continue
+            path.write_text(new if new.endswith("\n") else new + "\n", encoding="utf-8")
+            changes.append(f"updated {slug}")
+        elif t == "supersede":
+            changes.append(_apply_supersede(mem, a["slug"], a.get("superseded_by", ""), a.get("reason", "")))
+        # skip -> nothing
+    return changes
+
+
+def _catalog_text(mem: pathlib.Path) -> str:
+    cat = mem / "CATALOG.md"
+    if cat.exists():
+        return cat.read_text(encoding="utf-8")
+    return "# CATALOG\n\n> Full memory file list (Tier-2, on demand). One line per file.\n"
+
+
+def _apply_catalog_additions(mem: pathlib.Path, plan: dict) -> None:
+    adds = [ln.strip() for ln in plan.get("catalog_additions", []) if isinstance(ln, str) and ln.strip()]
+    adds = adds[:MAX_CATALOG_ADDITIONS]
+    if not adds:
+        return
+    text = _catalog_text(mem)
+    for ln in adds:
+        if ln not in text:
+            text = text.rstrip() + "\n" + ln + "\n"
+    (mem / "CATALOG.md").write_text(text, encoding="utf-8")
+
+
+def _ensure_reachable(mem: pathlib.Path, created_slugs: "list[str]") -> None:
+    """Safety net: every CREATED memory must be routable (MEMORY.md / INDEX_*.md /
+    CATALOG.md) or the doctor flags it dark. Append a CATALOG line for any the
+    model's catalog_additions didn't cover."""
+    if not created_slugs:
+        return
+    routing_parts: list[str] = []
+    for name in ("MEMORY.md", "CATALOG.md"):
+        p = mem / name
+        if p.exists():
+            routing_parts.append(p.read_text(encoding="utf-8"))
+    for p in mem.glob("INDEX_*.md"):
+        routing_parts.append(p.read_text(encoding="utf-8"))
+    blob = "\n".join(routing_parts)
+    text = _catalog_text(mem)
+    changed = False
+    for slug in created_slugs:
+        stem = slug[:-3] if slug.endswith(".md") else slug
+        if slug not in blob and stem not in blob and slug not in text:
+            text = text.rstrip() + f"\n- {slug} -- (autolearn)\n"
+            changed = True
+    if changed:
+        (mem / "CATALOG.md").write_text(text, encoding="utf-8")
+
+
+def _commit_drain(mem: pathlib.Path, n_changes: int) -> "str | None":
+    """Commit everything the drain touched (created/updated/superseded + CATALOG)
+    into the memory folder's git repo, so a bad unattended write is a one-command
+    `git revert HEAD`. No-op if the folder isn't a git work tree or nothing changed."""
+    if not n_changes:
         return None
     inside = subprocess.run(
-        ["git", "-C", str(mem), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True, text=True,
+        ["git", "-C", str(mem), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True
     )
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return None
-    subprocess.run(["git", "-C", str(mem), "add", "MEMORY.md", *filed], capture_output=True, text=True)
-    msg = f"autolearn: file {len(filed)} learning(s) via unattended drain"
+    subprocess.run(["git", "-C", str(mem), "add", "-A"], capture_output=True, text=True)
+    msg = f"autolearn: apply {n_changes} memory change(s) via unattended drain"
     commit = subprocess.run(["git", "-C", str(mem), "commit", "-m", msg], capture_output=True, text=True)
     if commit.returncode != 0:
         return None
@@ -529,35 +813,33 @@ def drain() -> int:
         print("queue empty -- nothing to drain")
         return 0
     model = _drain_model()
-    written = skipped = blocked = 0
-    filed: list[str] = []
-    for e in entries:
-        learning = _reflect(e, model)
-        if not learning or not learning.get("should_write"):
-            skipped += 1
-            continue
-        # SAME deterministic floor as --write-learning: an unattended drain must
-        # never write past a HARD finding (credential/malformed/oversize/dup).
-        # This is what makes scheduling the drain safe.
-        issues = validate_learning(learning, mem)
-        hard = [i for i in issues if i[0] == "HARD"]
-        if hard:
-            print(f"[blocked] {learning.get('name', '?')}:")
-            _print_issues(hard)
-            blocked += 1
-            continue
-        filed.append(write_learning_to(mem, learning))
-        written += 1
+    plan = _plan_reflect(entries, mem, model)
+    if plan is None:
+        # Keep the queue so the next drain retries -- never lose the commits to a
+        # model hiccup or a missing CLI.
+        print(f"drain: no usable plan from the model (model {model}) -- queue KEPT, nothing written")
+        return 1
+    errors = validate_plan(plan, _existing_slugs(mem))
+    if errors:
+        print("[blocked] plan failed the deterministic gate -- nothing written (queue KEPT):")
+        for e in errors:
+            print(f"  - {e}")
+        return 4
+    changes = apply_plan(mem, plan)
+    _apply_catalog_additions(mem, plan)
+    created = [a["slug"] for a in plan.get("actions", []) if a.get("type") == "create"]
+    _ensure_reachable(mem, created)
     queue_path().unlink(missing_ok=True)
     _stamp_drain()
-    committed = _commit_drain(mem, filed)
+    committed = _commit_drain(mem, len(changes))
     tail = (
         f"; committed {committed}" if committed
-        else ("; (memory folder is not a git repo -- no per-drain commit)" if filed else "")
+        else ("; (memory folder is not a git repo -- no per-drain commit)" if changes else "")
     )
+    detail = ("; " + "; ".join(changes)) if changes else " (no durable lessons)"
     print(
         f"drained {len(entries)} commit(s) with model {model}: "
-        f"filed {written}, skipped {skipped}, blocked {blocked} -> {mem}{tail}"
+        f"{len(changes)} change(s){detail} -> {mem}{tail}"
     )
     return 0
 

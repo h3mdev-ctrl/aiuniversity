@@ -277,9 +277,9 @@ def _git_init_memory(home) -> Path:
     return mem
 
 
-def _fake_reflect_file(tmp_path, learnings: list) -> Path:
-    p = tmp_path / "fake_reflect.json"
-    p.write_text(json.dumps(learnings), encoding="utf-8")
+def _fake_plan_file(tmp_path, plan: dict) -> Path:
+    p = tmp_path / "fake_plan.json"
+    p.write_text(json.dumps(plan), encoding="utf-8")
     return p
 
 
@@ -292,73 +292,134 @@ def _drain(home, fake: Path, **env_over):
     )
 
 
-def test_drain_files_a_good_learning_and_commits(tmp_path):
+def _create_action(**over):
+    a = {"type": "create", "slug": "feedback_drained-lesson.md",
+         "frontmatter": {"name": "drained-lesson", "description": "when you're about to X", "type": "feedback"},
+         "body": "do Y well. **Why:** because. **How to apply:** thus."}
+    a.update(over)
+    return a
+
+
+def test_drain_creates_and_commits(tmp_path):
     setup_memory(tmp_path)
     mem = _git_init_memory(tmp_path)
     _queue_n(tmp_path, 1)
-    fake = _fake_reflect_file(tmp_path, [
-        {"should_write": True, "type": "feedback", "name": "drained-lesson",
-         "description": "when you're about to X", "body": "do Y well"},
-    ])
+    fake = _fake_plan_file(tmp_path, {"actions": [_create_action()],
+                                      "catalog_additions": ["- feedback_drained-lesson.md -- the hook"]})
     r = _drain(tmp_path, fake)
-    assert r.returncode == 0
-    assert "filed 1" in r.stdout and "committed" in r.stdout
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "created feedback_drained-lesson.md" in r.stdout and "committed" in r.stdout
     assert (mem / "feedback_drained-lesson.md").exists()
-    # the drain is a real, revertible commit in the memory repo
-    log = subprocess.run(["git", "-C", str(mem), "log", "--oneline"],
-                         capture_output=True, text=True).stdout
+    # index growth landed in CATALOG, NOT the always-loaded MEMORY.md
+    assert "feedback_drained-lesson.md" in (mem / "CATALOG.md").read_text(encoding="utf-8")
+    log = subprocess.run(["git", "-C", str(mem), "log", "--oneline"], capture_output=True, text=True).stdout
     assert "unattended drain" in log
-    # queue is emptied after a drain
-    assert not (tmp_path / "autolearn_queue.jsonl").exists()
+    assert not (tmp_path / "autolearn_queue.jsonl").exists()  # queue cleared on success
+    # and the whole thing stays reachable -> doctor healthy
+    d = doctor(tmp_path)
+    assert d.returncode == 0 and "HEALTHY" in d.stdout
 
 
-def test_drain_blocks_a_hard_learning_and_writes_nothing(tmp_path):
+def test_drain_update_action_rewrites_existing(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    (mem / "feedback_topic.md").write_text(
+        "---\nname: topic\ndescription: old\ntype: feedback\n---\n\nold body\n", encoding="utf-8")
+    (mem / "CATALOG.md").write_text("# CATALOG\n\n- feedback_topic.md -- x\n", encoding="utf-8")
+    _queue_n(tmp_path, 1)
+    new_full = "---\nname: topic\ndescription: refined\ntype: feedback\n---\n\nold body, now with a durable extension line added.\n"
+    fake = _fake_plan_file(tmp_path, {"actions": [
+        {"type": "update", "slug": "feedback_topic.md", "new_full_content": new_full}]})
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0 and "updated feedback_topic.md" in r.stdout
+    assert "refined" in (mem / "feedback_topic.md").read_text(encoding="utf-8")
+
+
+def test_drain_update_clobber_guard_keeps_original(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    big = "---\nname: topic\ndescription: d\ntype: feedback\n---\n\n" + "\n".join(
+        f"a substantive durable line number {i} worth keeping" for i in range(20))
+    (mem / "feedback_topic.md").write_text(big, encoding="utf-8")
+    _queue_n(tmp_path, 1)
+    # a much-shorter rewrite that drops the substance -> must be refused
+    fake = _fake_plan_file(tmp_path, {"actions": [
+        {"type": "update", "slug": "feedback_topic.md",
+         "new_full_content": "---\nname: topic\ndescription: d\ntype: feedback\n---\n\ntiny\n"}]})
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0 and "would drop existing content" in r.stdout
+    assert "line number 19" in (mem / "feedback_topic.md").read_text(encoding="utf-8")  # original kept
+
+
+def test_drain_supersede_stamps_in_place(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    (mem / "feedback_stale.md").write_text(
+        "---\nname: stale\ndescription: d\ntype: feedback\n---\n\nold way\n", encoding="utf-8")
+    _queue_n(tmp_path, 1)
+    fake = _fake_plan_file(tmp_path, {"actions": [
+        _create_action(),
+        {"type": "supersede", "slug": "feedback_stale.md", "reason": "new way found",
+         "superseded_by": "feedback_drained-lesson.md"}],
+        "catalog_additions": ["- feedback_drained-lesson.md -- hook"]})
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0 and "superseded feedback_stale.md" in r.stdout
+    stale = (mem / "feedback_stale.md").read_text(encoding="utf-8")
+    assert "status: superseded" in stale and "new way found" in stale
+    assert "old way" in stale  # superseded, never deleted
+
+
+def test_drain_blocks_credential_in_plan(tmp_path):
     setup_memory(tmp_path)
     mem = _git_init_memory(tmp_path)
     _queue_n(tmp_path, 1)
-    fake = _fake_reflect_file(tmp_path, [
-        {"should_write": True, "type": "feedback", "name": "leaky",
-         "description": "when you're about to X", "body": "token is sk-ant-abcdef123456789 keep it"},
-    ])
+    fake = _fake_plan_file(tmp_path, {"actions": [
+        _create_action(slug="feedback_leaky.md", body="key is sk-ant-abcdef123456789 keep it")]})
     r = _drain(tmp_path, fake)
-    assert r.returncode == 0
-    assert "blocked 1" in r.stdout and "filed 0" in r.stdout
+    assert r.returncode == 4 and "credential" in r.stdout.lower()
     assert not (mem / "feedback_leaky.md").exists()
-    # nothing filed -> no drain commit
-    log = subprocess.run(["git", "-C", str(mem), "log", "--oneline"],
-                         capture_output=True, text=True).stdout
-    assert "unattended drain" not in log
+    assert (tmp_path / "autolearn_queue.jsonl").exists()  # queue KEPT on a blocked plan
 
 
-def test_drain_skips_should_write_false(tmp_path):
+def test_drain_blocks_create_of_existing_slug(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    (mem / "feedback_dup.md").write_text(
+        "---\nname: dup\ndescription: d\ntype: feedback\n---\n\nbody\n", encoding="utf-8")
+    _queue_n(tmp_path, 1)
+    fake = _fake_plan_file(tmp_path, {"actions": [_create_action(slug="feedback_dup.md")]})
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 4 and "already exists" in r.stdout
+
+
+def test_drain_all_skip_clears_queue_no_commit(tmp_path):
     setup_memory(tmp_path)
     _git_init_memory(tmp_path)
     _queue_n(tmp_path, 2)
-    fake = _fake_reflect_file(tmp_path, [{"should_write": False}, {"should_write": False}])
+    fake = _fake_plan_file(tmp_path, {"actions": [{"type": "skip"}]})
     r = _drain(tmp_path, fake)
-    assert r.returncode == 0 and "filed 0" in r.stdout and "skipped 2" in r.stdout
+    assert r.returncode == 0 and "0 change(s)" in r.stdout and "no durable lessons" in r.stdout
+    assert not (tmp_path / "autolearn_queue.jsonl").exists()  # success -> cleared
 
 
 def test_drain_reports_the_model_used(tmp_path):
     setup_memory(tmp_path)
     _git_init_memory(tmp_path)
     _queue_n(tmp_path, 1)
-    fake = _fake_reflect_file(tmp_path, [{"should_write": False}])
+    fake = _fake_plan_file(tmp_path, {"actions": [{"type": "skip"}]})
     r = _drain(tmp_path, fake, AUTOLEARN_DRAIN_MODEL="claude-haiku-4-5")
     assert "with model claude-haiku-4-5" in r.stdout
 
 
-def test_drain_without_repo_still_files_but_notes_no_commit(tmp_path):
+def test_drain_without_repo_still_writes_but_notes_no_commit(tmp_path):
     setup_memory(tmp_path)  # memory folder is NOT a git repo
     _queue_n(tmp_path, 1)
-    fake = _fake_reflect_file(tmp_path, [
-        {"should_write": True, "type": "feedback", "name": "norepo-lesson",
-         "description": "when you're about to X", "body": "do Y"},
-    ])
+    fake = _fake_plan_file(tmp_path, {"actions": [_create_action(slug="feedback_norepo.md",
+        frontmatter={"name": "norepo", "description": "when X", "type": "feedback"})],
+        "catalog_additions": ["- feedback_norepo.md -- hook"]})
     r = _drain(tmp_path, fake)
-    assert r.returncode == 0
-    assert "filed 1" in r.stdout and "not a git repo" in r.stdout
-    assert (tmp_path / "memory" / "feedback_norepo-lesson.md").exists()
+    assert r.returncode == 0 and "created feedback_norepo.md" in r.stdout and "not a git repo" in r.stdout
+    assert (tmp_path / "memory" / "feedback_norepo.md").exists()
 
 
 def test_install_workflow_ships_the_guide(tmp_path):
