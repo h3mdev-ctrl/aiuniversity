@@ -11,10 +11,23 @@ Flow:
     post-commit hook  --> --capture         (append the commit to a queue, instant)
     at wrap-up        --> Claude reads --show-queue, reflects, and files durable
                           lessons via --write-learning; then --clear-queue.
-    (or unattended)   --> --drain runs the reflection headless via `claude -p`.
+    (or unattended)   --> --drain runs the reflection headless via `claude -p`,
+                          filing each learning through the SAME deterministic gate
+                          as --write-learning and committing the result so a bad
+                          write is a one-command `git revert`.
 
 The 6 phantom stages: Observe (the diff) -> Critique/Generate (the lesson) ->
 Validate (skip trivial) -> Apply (--write-learning) -> Consolidate (the doctor).
+
+Unattended drain safety (why this is OK to schedule):
+  * Every candidate learning passes validate_learning() before it is written --
+    a HARD finding (credential, malformed frontmatter, oversize, dup) is refused,
+    exactly like the interactive --write-learning path. No model is trusted to
+    self-police; the gate is pure deterministic code.
+  * Each drain is one git commit in the memory folder (if it is a repo), so any
+    bad autonomous write is `git revert HEAD`, not a manual cleanup.
+  * The reflection model is a cheap tier by default -- $AUTOLEARN_DRAIN_MODEL
+    (default claude-haiku-4-5); a one-shot structured reflection doesn't need Opus.
 
 Modes:
     --install-hook     install a git post-commit hook (calls --capture) in the cwd repo
@@ -69,6 +82,12 @@ def _nudge_stale_minutes() -> int:
         return max(1, int(os.environ.get("AUTOLEARN_NUDGE_STALE_MINUTES", "120")))
     except ValueError:
         return 120
+
+
+def _drain_model() -> str:
+    # A one-shot structured reflection -- a cheap tier is plenty. Override with
+    # $AUTOLEARN_DRAIN_MODEL if you want Sonnet/Opus for a run.
+    return (os.environ.get("AUTOLEARN_DRAIN_MODEL") or "claude-haiku-4-5").strip() or "claude-haiku-4-5"
 
 
 def _stamp_drain() -> None:
@@ -255,6 +274,17 @@ def _slugify(name: str) -> str:
     return s.strip("-") or "learning"
 
 
+def _slug_for(name: str, ltype: str) -> str:
+    """Slug for a learning, minus a doubled type prefix. A reflecting model often
+    proposes a name like 'feedback-foo'; the filename already prefixes the type,
+    so keep it 'feedback_foo.md', not 'feedback_feedback-foo.md'."""
+    ltype = ltype if ltype in ("feedback", "reference") else "feedback"
+    slug = _slugify(name)
+    if slug.startswith(f"{ltype}-"):
+        slug = slug[len(ltype) + 1:] or "learning"
+    return slug
+
+
 # --- deterministic validation gates (NO model needed) -----------------------
 # Phantom deleted their LLM judge panel ("cost, no signal") in favour of
 # deterministic invariants. We do the same: these gates are pure code, so the
@@ -314,8 +344,9 @@ def validate_learning(learning: dict, mem: pathlib.Path) -> "list[tuple[str, str
 
     # duplicate -- the file already exists; updating by hand beats overwriting
     if name:
-        slug = _slugify(name)
-        if (mem / f"{ltype if ltype in ('feedback', 'reference') else 'feedback'}_{slug}.md").exists():
+        slug = _slug_for(name, ltype)
+        norm_type = ltype if ltype in ("feedback", "reference") else "feedback"
+        if (mem / f"{norm_type}_{slug}.md").exists():
             issues.append(("HARD", f"a memory named {slug!r} already exists -- update it by hand instead of overwriting"))
         elif slug in (mem / "MEMORY.md").read_text(encoding="utf-8") if (mem / "MEMORY.md").exists() else False:
             issues.append(("SOFT", f"{slug!r} already appears in MEMORY.md -- possible near-duplicate"))
@@ -332,7 +363,7 @@ def write_learning_to(mem: pathlib.Path, learning: dict) -> str:
     ltype = learning.get("type", "feedback")
     if ltype not in ("feedback", "reference"):
         ltype = "feedback"
-    slug = _slugify(learning.get("name", "learning"))
+    slug = _slug_for(learning.get("name", "learning"), ltype)
     desc = (learning.get("description") or "(add a triggering moment)").strip()
     body = (learning.get("body") or "").strip() or "(add the lesson)"
     fname = f"{ltype}_{slug}.md"
@@ -420,6 +451,69 @@ REFLECT_PROMPT = (
 )
 
 
+# A test/dry-run seam: point $AUTOLEARN_FAKE_REFLECT at a JSON list of learning
+# dicts and the reflector returns them in order instead of calling `claude -p`.
+# Lets the gate + commit path be exercised deterministically with no live model.
+_FAKE_REFLECT_ENV = "AUTOLEARN_FAKE_REFLECT"
+_fake_iter = None
+
+
+def _next_fake(path: str) -> "dict | None":
+    global _fake_iter
+    if _fake_iter is None:
+        data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        _fake_iter = iter(data if isinstance(data, list) else [data])
+    return next(_fake_iter, None)
+
+
+def _reflect(entry: dict, model: str) -> "dict | None":
+    """Turn one queued commit into a candidate learning dict (or None if the model
+    errored / returned nothing parseable)."""
+    fake = os.environ.get(_FAKE_REFLECT_ENV)
+    if fake:
+        return _next_fake(fake)
+    # Resolve the CLI via shutil.which -- on Windows `claude` is an npm `.cmd`
+    # shim and bare subprocess.run(["claude", ...]) can't find it (CreateProcess
+    # doesn't apply PATHEXT). The full path (claude.CMD) launches fine.
+    exe = shutil.which("claude")
+    if not exe:
+        return None  # no claude CLI on PATH -- can't reflect headlessly
+    # Feed the prompt on STDIN, not as an argv element: a .cmd re-parses its args
+    # through cmd.exe, which would mangle a multi-line, brace/quote-laden prompt.
+    prompt = REFLECT_PROMPT + f"{entry.get('subject','')}\n{entry.get('body','')}\n{entry.get('stat','')}"
+    r = subprocess.run([exe, "-p", "--model", model], input=prompt, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    out = r.stdout.strip()
+    try:
+        return json.loads(out[out.find("{"): out.rfind("}") + 1])
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _commit_drain(mem: pathlib.Path, filed: "list[str]") -> "str | None":
+    """Commit the drained learnings + the MEMORY.md resolver update into the memory
+    folder's git repo, so a bad unattended write is a one-command `git revert`.
+    No-op (returns None) if the folder isn't a git work tree or nothing was filed."""
+    if not filed:
+        return None
+    inside = subprocess.run(
+        ["git", "-C", str(mem), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return None
+    subprocess.run(["git", "-C", str(mem), "add", "MEMORY.md", *filed], capture_output=True, text=True)
+    msg = f"autolearn: file {len(filed)} learning(s) via unattended drain"
+    commit = subprocess.run(["git", "-C", str(mem), "commit", "-m", msg], capture_output=True, text=True)
+    if commit.returncode != 0:
+        return None
+    sha = subprocess.run(
+        ["git", "-C", str(mem), "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    return sha or "HEAD"
+
+
 def drain() -> int:
     mem = resolve_memory()
     if mem is None:
@@ -429,23 +523,37 @@ def drain() -> int:
     if not entries:
         print("queue empty -- nothing to drain")
         return 0
-    written = 0
+    model = _drain_model()
+    written = skipped = blocked = 0
+    filed: list[str] = []
     for e in entries:
-        prompt = REFLECT_PROMPT + f"{e.get('subject','')}\n{e.get('body','')}\n{e.get('stat','')}"
-        r = subprocess.run(["claude", "-p", prompt], capture_output=True, text=True)
-        if r.returncode != 0:
+        learning = _reflect(e, model)
+        if not learning or not learning.get("should_write"):
+            skipped += 1
             continue
-        out = r.stdout.strip()
-        try:
-            learning = json.loads(out[out.find("{"): out.rfind("}") + 1])
-        except (json.JSONDecodeError, ValueError):
+        # SAME deterministic floor as --write-learning: an unattended drain must
+        # never write past a HARD finding (credential/malformed/oversize/dup).
+        # This is what makes scheduling the drain safe.
+        issues = validate_learning(learning, mem)
+        hard = [i for i in issues if i[0] == "HARD"]
+        if hard:
+            print(f"[blocked] {learning.get('name', '?')}:")
+            _print_issues(hard)
+            blocked += 1
             continue
-        if learning.get("should_write"):
-            write_learning_to(mem, learning)
-            written += 1
+        filed.append(write_learning_to(mem, learning))
+        written += 1
     queue_path().unlink(missing_ok=True)
     _stamp_drain()
-    print(f"drained {len(entries)} commit(s), filed {written} learning(s) into {mem}")
+    committed = _commit_drain(mem, filed)
+    tail = (
+        f"; committed {committed}" if committed
+        else ("; (memory folder is not a git repo -- no per-drain commit)" if filed else "")
+    )
+    print(
+        f"drained {len(entries)} commit(s) with model {model}: "
+        f"filed {written}, skipped {skipped}, blocked {blocked} -> {mem}{tail}"
+    )
     return 0
 
 

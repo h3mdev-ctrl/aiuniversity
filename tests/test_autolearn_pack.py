@@ -178,6 +178,19 @@ def test_gate_does_not_block_a_normal_lesson(tmp_path):
     assert r.returncode == 0
 
 
+def test_write_learning_strips_doubled_type_prefix(tmp_path):
+    # a model often names it 'feedback-foo'; the filename already prefixes the type,
+    # so it must land as feedback_foo.md, NOT feedback_feedback-foo.md
+    setup_memory(tmp_path)
+    r = run("--write-learning", home=tmp_path, stdin=json.dumps(
+        {"should_write": True, "type": "feedback", "name": "feedback-foo-bar",
+         "description": "when you're about to X", "body": "do Y"}))
+    assert r.returncode == 0
+    mem = tmp_path / "memory"
+    assert (mem / "feedback_foo-bar.md").exists()
+    assert not (mem / "feedback_feedback-foo-bar.md").exists()
+
+
 def test_write_learning_requires_memory(tmp_path):
     r = run("--write-learning", home=tmp_path, stdin=json.dumps({"should_write": True, "name": "x", "body": "y"}))
     assert r.returncode == 1 and "no memory" in r.stdout
@@ -244,6 +257,108 @@ def test_nudge_silent_right_after_a_drain(tmp_path):
     _queue_n(tmp_path, 6)                  # queue deep again immediately
     r = run("--nudge", home=tmp_path)      # but not stale -> stay quiet
     assert r.returncode == 1
+
+
+# --- unattended drain: gate + commit (no live model -- fake reflector) -------
+
+
+def _git_init_memory(home) -> Path:
+    """Make the discovered memory folder a git repo so commit-per-drain runs."""
+    mem = home / "memory"
+
+    def g(*a):
+        return subprocess.run(["git", *a], cwd=mem, capture_output=True, text=True)
+
+    g("init", "-q")
+    g("config", "user.email", "t@example.test")
+    g("config", "user.name", "t")
+    g("add", "-A")
+    g("commit", "-q", "-m", "seed memory")
+    return mem
+
+
+def _fake_reflect_file(tmp_path, learnings: list) -> Path:
+    p = tmp_path / "fake_reflect.json"
+    p.write_text(json.dumps(learnings), encoding="utf-8")
+    return p
+
+
+def _drain(home, fake: Path, **env_over):
+    env = dict(os.environ, CLAUDE_HOME=str(home), AUTOLEARN_FAKE_REFLECT=str(fake))
+    env.update(env_over)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--drain"],
+        capture_output=True, text=True, env=env, encoding="utf-8",
+    )
+
+
+def test_drain_files_a_good_learning_and_commits(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 1)
+    fake = _fake_reflect_file(tmp_path, [
+        {"should_write": True, "type": "feedback", "name": "drained-lesson",
+         "description": "when you're about to X", "body": "do Y well"},
+    ])
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0
+    assert "filed 1" in r.stdout and "committed" in r.stdout
+    assert (mem / "feedback_drained-lesson.md").exists()
+    # the drain is a real, revertible commit in the memory repo
+    log = subprocess.run(["git", "-C", str(mem), "log", "--oneline"],
+                         capture_output=True, text=True).stdout
+    assert "unattended drain" in log
+    # queue is emptied after a drain
+    assert not (tmp_path / "autolearn_queue.jsonl").exists()
+
+
+def test_drain_blocks_a_hard_learning_and_writes_nothing(tmp_path):
+    setup_memory(tmp_path)
+    mem = _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 1)
+    fake = _fake_reflect_file(tmp_path, [
+        {"should_write": True, "type": "feedback", "name": "leaky",
+         "description": "when you're about to X", "body": "token is sk-ant-abcdef123456789 keep it"},
+    ])
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0
+    assert "blocked 1" in r.stdout and "filed 0" in r.stdout
+    assert not (mem / "feedback_leaky.md").exists()
+    # nothing filed -> no drain commit
+    log = subprocess.run(["git", "-C", str(mem), "log", "--oneline"],
+                         capture_output=True, text=True).stdout
+    assert "unattended drain" not in log
+
+
+def test_drain_skips_should_write_false(tmp_path):
+    setup_memory(tmp_path)
+    _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 2)
+    fake = _fake_reflect_file(tmp_path, [{"should_write": False}, {"should_write": False}])
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0 and "filed 0" in r.stdout and "skipped 2" in r.stdout
+
+
+def test_drain_reports_the_model_used(tmp_path):
+    setup_memory(tmp_path)
+    _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 1)
+    fake = _fake_reflect_file(tmp_path, [{"should_write": False}])
+    r = _drain(tmp_path, fake, AUTOLEARN_DRAIN_MODEL="claude-haiku-4-5")
+    assert "with model claude-haiku-4-5" in r.stdout
+
+
+def test_drain_without_repo_still_files_but_notes_no_commit(tmp_path):
+    setup_memory(tmp_path)  # memory folder is NOT a git repo
+    _queue_n(tmp_path, 1)
+    fake = _fake_reflect_file(tmp_path, [
+        {"should_write": True, "type": "feedback", "name": "norepo-lesson",
+         "description": "when you're about to X", "body": "do Y"},
+    ])
+    r = _drain(tmp_path, fake)
+    assert r.returncode == 0
+    assert "filed 1" in r.stdout and "not a git repo" in r.stdout
+    assert (tmp_path / "memory" / "feedback_norepo-lesson.md").exists()
 
 
 def test_install_workflow_ships_the_guide(tmp_path):
