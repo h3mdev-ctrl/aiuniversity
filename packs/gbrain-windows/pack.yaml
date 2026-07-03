@@ -20,6 +20,13 @@
 # (slug conventions + a resolver-page filing map) and files/example_brain_page.md
 # (the shape of a good page). Modeled on a real, heavily-used brain -- copy the
 # structure, not the content.
+#
+# NIGHTLY "DREAM" CYCLE on Windows (optional, advanced): see
+# files/dream_cycle_windows.md before you set up a nightly dream job. Key point:
+# the structural half is free + model-free (do that); the LLM deep-extract needs
+# a reliable chat model and a local 8B is NOT reliable for it -- you do NOT need
+# codex, use structural-only or a cheap hosted model. Plus the openai:-not-ollama:
+# and cmd.exe-not-PS-2>&1 Windows traps.
 name: gbrain-windows
 version: 0.2.0
 variants: [local, supabase]

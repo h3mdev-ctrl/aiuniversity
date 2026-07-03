@@ -51,6 +51,16 @@ def test_gbrain_ships_structure_examples():
     assert (files / "example_brain_page.md").exists()
 
 
+def test_gbrain_ships_dream_cycle_windows_note():
+    doc = REPO / "packs" / "gbrain-windows" / "files" / "dream_cycle_windows.md"
+    assert doc.exists()
+    text = doc.read_text(encoding="utf-8")
+    # the load-bearing points must be present
+    assert "structural-only" in text.lower()
+    assert "codex" in text.lower()          # "you do NOT need codex"
+    assert "openai:" in text and "ollama:" in text  # the provider-prefix trap
+
+
 def test_check_red_then_green(tmp_path):
     assert run(WIKI, "setup_wiki.py", "--check", home=tmp_path).returncode == 1
     run(WIKI, "setup_wiki.py", home=tmp_path)
