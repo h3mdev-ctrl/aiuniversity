@@ -40,6 +40,16 @@ def test_install_creates_the_structure(tmp_path):
         assert (mem / f).exists(), f"missing {f}"
 
 
+def test_install_ships_worked_examples(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    mem = tmp_path / "memory"
+    for f in ("_example_index.md", "_example_feedback.md", "_example_reference.md"):
+        assert (mem / f).exists(), f"missing {f}"
+    # examples are underscore-prefixed -> the doctor ignores them; still HEALTHY
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0 and "HEALTHY" in r.stdout
+
+
 def test_check_is_red_before_and_green_after_install(tmp_path):
     assert run("setup_memory.py", "--check", home=tmp_path).returncode == 1
     run("setup_memory.py", home=tmp_path)

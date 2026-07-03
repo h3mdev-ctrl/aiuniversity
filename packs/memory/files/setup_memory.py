@@ -76,6 +76,10 @@ MEMORY_MD = """# Memory -- your Claude's compounding notes
 > **Always-loaded index. Routing only, no prose -- keep it SMALL.** Every line
 > here is loaded into every session, so it is a tax on every conversation. The
 > index is a *map*, not the content.
+>
+> **New here? Read `_example_index.md`** in this folder -- a worked example of a
+> mature index (RESOLVER + ROUTER tiering), plus `_example_feedback.md` /
+> `_example_reference.md` showing what an individual memory file looks like.
 
 ## RESOLVER -- intent -> memory
 
@@ -194,6 +198,14 @@ def install() -> int:
     if doc_src.exists() and not doc_dst.exists():
         shutil.copyfile(doc_src, doc_dst)
         wrote.append("memory_doctor.py")
+
+    # Ship worked examples (a mature index + two atomic memories) so Claude has a
+    # concrete structure to copy. Prefixed with "_" so the doctor ignores them.
+    for src in sorted(here.glob("example_*.md")):
+        dst = m / ("_" + src.name)
+        if not dst.exists():
+            shutil.copyfile(src, dst)
+            wrote.append(dst.name)
 
     print(f"memory home: {m}")
     print("created: " + (", ".join(wrote) if wrote else "(nothing -- already set up)"))
