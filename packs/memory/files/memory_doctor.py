@@ -39,12 +39,16 @@ def candidate_dirs() -> "list[pathlib.Path]":
     return dirs
 
 
-def find_memory() -> "pathlib.Path | None":
-    """The first candidate that actually holds a MEMORY.md, else None."""
+def discover_memories() -> "list[pathlib.Path]":
+    """ALL candidate dirs that hold a MEMORY.md (de-duped, order kept)."""
+    found: list[pathlib.Path] = []
+    seen: set = set()
     for d in candidate_dirs():
-        if (d / "MEMORY.md").exists():
-            return d
-    return None
+        key = str(d).lower()  # Windows paths are case-insensitive -- de-dupe on it
+        if (d / "MEMORY.md").exists() and key not in seen:
+            seen.add(key)
+            found.append(d)
+    return found
 
 
 def is_memory_file(p: pathlib.Path) -> bool:
@@ -66,14 +70,24 @@ def has_frontmatter(text: str) -> bool:
 
 
 def run() -> int:
-    m = find_memory()
-    if m is None:
+    found = discover_memories()
+    if len(found) > 1:
+        # Refuse to guess which to audit -- silently picking one is exactly how an
+        # audit ends up "it's fine" against the wrong project's memory.
+        print(f"[ambiguous] {len(found)} memory systems found -- refusing to guess:")
+        for d in found:
+            print(f"  - {d}")
+        print("Pin the right one with CLAUDE_MEMORY_HOME (the memory folder) and re-run.")
+        print("VERDICT: ISSUES")
+        return 1
+    if not found:
         print("[none] no memory system found. Searched:")
         for d in candidate_dirs():
             print(f"  - {d}")
         print("VERDICT: ISSUES")
         return 1
 
+    m = found[0]
     print(f"[found] auditing memory at {m}")
     index = m / "MEMORY.md"
     index_text = index.read_text(encoding="utf-8")

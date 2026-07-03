@@ -25,11 +25,14 @@ steps:
       type: command_succeeds
       cmd: python packs/memory/files/setup_memory.py --check
     on_fail: >
-      No memory system found anywhere. See where it looked, then create one:
+      Run --find first to see the situation:
       python packs/memory/files/setup_memory.py --find
+      -- if it says "no memory system found": create one with
       python packs/memory/files/setup_memory.py
-      (If you DO have memory but it wasn't found, it's in a non-standard location --
-      set CLAUDE_MEMORY_HOME to point at it rather than creating a duplicate.)
+      -- if it says "AMBIGUOUS" (more than one found): do NOT create a duplicate.
+      Pin the right one: set CLAUDE_MEMORY_HOME=<the correct memory folder from the
+      list>, then re-check. (It refuses to guess on purpose -- silently picking one
+      is how an audit ends up looking at the wrong project and saying "it's fine".)
 
   - id: index-healthy
     instruction: >

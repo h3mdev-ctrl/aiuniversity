@@ -27,6 +27,12 @@ keeps it). New systems are created at <home>/memory only if none is found. This
 prevents the "location mismatch" trap: reporting memory as missing and building a
 duplicate next to a working one. (home = $CLAUDE_HOME or ~/.claude.)
 
+If MORE THAN ONE memory system is found (e.g. several project-scoped ones), we do
+NOT pick one -- glob/sort order is unreliable (case-insensitive on Windows), so a
+silent pick can audit the wrong project. Instead we fail loudly and list them;
+pin the right one with $CLAUDE_MEMORY_HOME (which points straight at the memory
+folder). Reported by a friend's real two-project case.
+
 Everything is idempotent: existing files are never overwritten.
 """
 import os
@@ -59,12 +65,28 @@ def candidate_dirs() -> "list[pathlib.Path]":
     return dirs
 
 
-def find_memory() -> "pathlib.Path | None":
-    """The first candidate that actually holds a MEMORY.md, else None."""
+def discover_memories() -> "list[pathlib.Path]":
+    """ALL candidate dirs that actually hold a MEMORY.md (de-duped, order kept)."""
+    found: list[pathlib.Path] = []
+    seen: set[str] = set()
     for d in candidate_dirs():
-        if (d / "MEMORY.md").exists():
-            return d
-    return None
+        key = str(d).lower()  # Windows paths are case-insensitive -- de-dupe on it
+        if (d / "MEMORY.md").exists() and key not in seen:
+            seen.add(key)
+            found.append(d)
+    return found
+
+
+def find_memory() -> "pathlib.Path | None":
+    """The SINGLE unambiguous memory location, or None.
+
+    None means either zero found (needs setup) OR more than one found
+    (ambiguous). We never silently pick among several -- guessing here is exactly
+    how an audit ends up looking at the wrong project's memory and reporting
+    "it's fine". Callers surface the ambiguity; the user pins CLAUDE_MEMORY_HOME.
+    """
+    found = discover_memories()
+    return found[0] if len(found) == 1 else None
 
 
 def claude_md() -> pathlib.Path:
@@ -168,11 +190,17 @@ add a RESOLVER row so it's findable.
 
 def install() -> int:
     # Discover first -- never create a duplicate alongside an existing memory
-    # system (e.g. a project-scoped one). This is the "audit + find where it is,
-    # don't blindly make a new one" rule.
-    existing = find_memory()
-    if existing is not None:
-        print(f"found existing memory at {existing}")
+    # system, and never guess when there are several.
+    found = discover_memories()
+    if len(found) > 1:
+        print(f"AMBIGUOUS: {len(found)} memory systems found -- NOT guessing which:")
+        for d in found:
+            print(f"  - {d}")
+        print("Pick the right one and re-run, e.g.:")
+        print(f'  set CLAUDE_MEMORY_HOME={found[-1]}   (then run --check / the doctor)')
+        return 3
+    if len(found) == 1:
+        print(f"found existing memory at {found[0]}")
         print("not creating a duplicate. Audit it with:")
         print("  python packs/memory/files/memory_doctor.py")
         return 0
@@ -219,10 +247,16 @@ def check() -> int:
 
 
 def find() -> int:
-    m = find_memory()
-    if m is not None:
-        print(f"memory found at: {m}")
+    found = discover_memories()
+    if len(found) == 1:
+        print(f"memory found at: {found[0]}")
         return 0
+    if len(found) > 1:
+        print(f"AMBIGUOUS: {len(found)} memory systems found. Pin one with "
+              f"CLAUDE_MEMORY_HOME (points at the memory folder):")
+        for d in found:
+            print(f"  - {d}")
+        return 2
     print("no memory system found. Searched:")
     for d in candidate_dirs():
         print(f"  - {d}")

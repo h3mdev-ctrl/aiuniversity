@@ -109,6 +109,60 @@ def test_find_reports_none_when_absent(tmp_path):
     assert "no memory system found" in r.stdout
 
 
+# --- ambiguity: >1 memory found -> fail loud, never silently pick ------------
+# (Jason's real case: "brain" sorts before "Documents-ClaudeCode" case-folded.)
+
+
+def _two_project_memories(tmp_path):
+    for name in ("C--Users-jason-brain", "C--Users-jason-Documents-ClaudeCode"):
+        d = tmp_path / "projects" / name / "memory"
+        d.mkdir(parents=True)
+        (d / "MEMORY.md").write_text("# Memory\n\nindex only\n", encoding="utf-8")
+
+
+def test_check_fails_when_ambiguous(tmp_path):
+    _two_project_memories(tmp_path)
+    # must NOT silently pass by guessing one
+    assert run("setup_memory.py", "--check", home=tmp_path).returncode != 0
+
+
+def test_find_reports_ambiguity_and_lists_all(tmp_path):
+    _two_project_memories(tmp_path)
+    r = run("setup_memory.py", "--find", home=tmp_path)
+    assert r.returncode != 0
+    assert "AMBIGUOUS" in r.stdout
+    assert "brain" in r.stdout and "ClaudeCode" in r.stdout  # both listed
+
+
+def test_install_refuses_and_does_not_duplicate_when_ambiguous(tmp_path):
+    _two_project_memories(tmp_path)
+    r = run("setup_memory.py", home=tmp_path)
+    assert r.returncode != 0
+    assert "AMBIGUOUS" in r.stdout
+    assert not (tmp_path / "memory" / "MEMORY.md").exists()  # no global duplicate
+
+
+def test_doctor_fails_loudly_when_ambiguous(tmp_path):
+    _two_project_memories(tmp_path)
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 1
+    assert "ambiguous" in r.stdout.lower()
+    assert "VERDICT: ISSUES" in r.stdout
+
+
+def test_pinning_CLAUDE_MEMORY_HOME_resolves_ambiguity(tmp_path):
+    _two_project_memories(tmp_path)
+    target = tmp_path / "projects" / "C--Users-jason-Documents-ClaudeCode" / "memory"
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path), CLAUDE_MEMORY_HOME=str(target))
+    r = subprocess.run(
+        [sys.executable, str(FILES / "memory_doctor.py")],
+        capture_output=True, text=True, env=env, encoding="utf-8",
+    )
+    assert r.returncode == 0
+    assert "HEALTHY" in r.stdout
+    assert str(target) in r.stdout  # audited the pinned one, not the other
+
+
 def test_wire_and_check_wire(tmp_path):
     run("setup_memory.py", home=tmp_path)
     assert run("setup_memory.py", "--check-wire", home=tmp_path).returncode == 1
