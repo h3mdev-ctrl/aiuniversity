@@ -50,7 +50,53 @@ def test_install_is_idempotent(tmp_path):
     run("setup_memory.py", home=tmp_path)
     second = run("setup_memory.py", home=tmp_path)
     assert second.returncode == 0
-    assert "already set up" in second.stdout
+    # discovery short-circuits: it finds the one it just made, doesn't duplicate
+    assert "found existing" in second.stdout
+
+
+# --- discovery: audit + find where it is (don't build a duplicate) ----------
+
+
+def _project_scoped_memory(tmp_path):
+    """Simulate Claude Code's project-scoped memory location."""
+    d = tmp_path / "projects" / "C--Users-jason-ClaudeCode" / "memory"
+    d.mkdir(parents=True)
+    (d / "MEMORY.md").write_text("# Memory\n\nindex only\n", encoding="utf-8")
+    return d
+
+
+def test_check_finds_project_scoped_memory(tmp_path):
+    _project_scoped_memory(tmp_path)  # no global memory, only project-scoped
+    assert run("setup_memory.py", "--check", home=tmp_path).returncode == 0
+
+
+def test_find_reports_the_project_scoped_location(tmp_path):
+    _project_scoped_memory(tmp_path)
+    r = run("setup_memory.py", "--find", home=tmp_path)
+    assert r.returncode == 0
+    assert "projects" in r.stdout and "memory" in r.stdout
+
+
+def test_install_does_not_duplicate_when_project_scoped_exists(tmp_path):
+    _project_scoped_memory(tmp_path)
+    r = run("setup_memory.py", home=tmp_path)
+    assert r.returncode == 0
+    assert "found existing" in r.stdout
+    assert not (tmp_path / "memory" / "MEMORY.md").exists()  # no global duplicate
+
+
+def test_doctor_audits_the_discovered_project_scoped_memory(tmp_path):
+    _project_scoped_memory(tmp_path)
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0
+    assert "auditing memory at" in r.stdout
+    assert "HEALTHY" in r.stdout
+
+
+def test_find_reports_none_when_absent(tmp_path):
+    r = run("setup_memory.py", "--find", home=tmp_path)
+    assert r.returncode == 1
+    assert "no memory system found" in r.stdout
 
 
 def test_wire_and_check_wire(tmp_path):

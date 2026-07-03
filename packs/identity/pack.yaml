@@ -1,0 +1,70 @@
+# identity -- who you are + how Claude should talk to you.
+#
+# Layer 0 of the foundation. This is an INTERVIEW pack: it asks a series of short
+# questions once, then writes the answers into three context files, a user_profile
+# memory (with a canary), and a "who you're speaking to" block in CLAUDE.md.
+# After this, every session starts with Claude actually knowing who you are.
+#
+# Two ways to answer the interview:
+#   - --interactive  you run it yourself and answer prompts on stdin.
+#   - --write        Claude conducts the interview in teach mode, then pipes the
+#                    JSON answers to the script (this is how SKILL.md drives it).
+# Verify checks presence; the identity-probe step is the live behavioural check.
+#
+# Commands run from the repo root.
+name: identity
+version: 0.1.0
+steps:
+  - id: context
+    instruction: >
+      Answer a short interview so Claude knows who you are and how you want it to
+      talk to you. Writes three context files -- me / work / current priorities --
+      to your Claude home. Skip this and every session starts with Claude
+      improvising against a stranger.
+    check:
+      type: command_succeeds
+      cmd: python packs/identity/files/setup_identity.py --check
+    on_fail: >
+      No identity found. Answer the interview:
+      python packs/identity/files/setup_identity.py --interactive
+      (Or, if Claude is running the pack in teach mode, it will pipe your answers
+      to `--write` as JSON on stdin.)
+
+  - id: profile-memory
+    instruction: >
+      Add a user_profile entry to your memory index so the "who you're speaking to"
+      question routes back to your identity from any moment in a session. Needs the
+      memory pack set up first.
+    check:
+      type: command_succeeds
+      cmd: python packs/identity/files/setup_identity.py --check-memory
+    on_fail: >
+      Identity isn't linked to memory yet. Link it:
+      python packs/identity/files/setup_identity.py --link-memory
+      (If it says "no memory system found", run the memory pack first: packs/memory)
+
+  - id: wired-to-constitution
+    instruction: >
+      Point your always-loaded CLAUDE.md at the context files, so every session
+      genuinely reads them before speaking.
+    check:
+      type: command_succeeds
+      cmd: python packs/identity/files/setup_identity.py --check-wire
+    on_fail: >
+      CLAUDE.md doesn't point at your identity yet. Wire it:
+      python packs/identity/files/setup_identity.py --wire
+
+  - id: identity-probe
+    instruction: >
+      The behavioural test: in a FRESH Claude session, ask who it's speaking to.
+      If identity is truly loaded, your user_profile surfaces and the canary phrase
+      comes back. This is what proves it's ACTIVE, not just written.
+    check:
+      type: contains
+      cmd: |
+        claude -p "Who are you speaking to, and what is the identity canary phrase? Answer with just the phrase."
+      expect: PURPLE-KANGAROO-9271
+    on_fail: >
+      Identity is on disk but a fresh session didn't surface it -- "functionally
+      dark". Check CLAUDE.md points at context/me.md (the wiring step) and that
+      MEMORY.md lists user_profile. Then retry. (This spawns a real Claude turn.)

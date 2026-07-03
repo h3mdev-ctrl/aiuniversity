@@ -25,9 +25,26 @@ import sys
 INDEX_LINE_BUDGET = 200
 
 
-def mem_dir() -> pathlib.Path:
+def candidate_dirs() -> "list[pathlib.Path]":
+    """Where a memory system might live -- explicit override, global, then any
+    project-scoped folder (~/.claude/projects/<hash>/memory)."""
+    env = os.environ.get("CLAUDE_MEMORY_HOME")
+    if env:
+        return [pathlib.Path(env)]
     base = pathlib.Path(os.environ.get("CLAUDE_HOME") or (pathlib.Path.home() / ".claude"))
-    return base / "memory"
+    dirs = [base / "memory"]
+    proj = base / "projects"
+    if proj.exists():
+        dirs += sorted(proj.glob("*/memory"))
+    return dirs
+
+
+def find_memory() -> "pathlib.Path | None":
+    """The first candidate that actually holds a MEMORY.md, else None."""
+    for d in candidate_dirs():
+        if (d / "MEMORY.md").exists():
+            return d
+    return None
 
 
 def is_memory_file(p: pathlib.Path) -> bool:
@@ -49,13 +66,16 @@ def has_frontmatter(text: str) -> bool:
 
 
 def run() -> int:
-    m = mem_dir()
-    index = m / "MEMORY.md"
-    if not index.exists():
-        print(f"[missing] no MEMORY.md index at {index}")
+    m = find_memory()
+    if m is None:
+        print("[none] no memory system found. Searched:")
+        for d in candidate_dirs():
+            print(f"  - {d}")
         print("VERDICT: ISSUES")
         return 1
 
+    print(f"[found] auditing memory at {m}")
+    index = m / "MEMORY.md"
     index_text = index.read_text(encoding="utf-8")
     issues: list[str] = []
 

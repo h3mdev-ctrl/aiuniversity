@@ -16,16 +16,20 @@ version: 0.1.0
 steps:
   - id: structure
     instruction: >
-      Create your memory system: a memory/ folder with an always-loaded index
-      (MEMORY.md) that routes "when you're about to X" to the note that helps, plus
-      a new-memory template and a structural doctor. This is the thing that lets
-      Claude compound what it learns instead of forgetting between sessions.
+      Find or create your memory system. FIRST it looks for an existing one --
+      global (~/.claude/memory) or project-scoped (~/.claude/projects/<id>/memory,
+      where Claude Code usually keeps it) -- and only creates a new one if there
+      genuinely isn't any. This is a memory/ folder with an always-loaded index
+      (MEMORY.md) that routes "when you're about to X" to the note that helps.
     check:
       type: command_succeeds
       cmd: python packs/memory/files/setup_memory.py --check
     on_fail: >
-      No memory index found. Create the structure (idempotent -- it won't touch
-      anything you already have): python packs/memory/files/setup_memory.py
+      No memory system found anywhere. See where it looked, then create one:
+      python packs/memory/files/setup_memory.py --find
+      python packs/memory/files/setup_memory.py
+      (If you DO have memory but it wasn't found, it's in a non-standard location --
+      set CLAUDE_MEMORY_HOME to point at it rather than creating a duplicate.)
 
   - id: index-healthy
     instruction: >

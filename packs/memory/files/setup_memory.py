@@ -13,13 +13,19 @@ but the always-loaded index depends on no tool):
 
 Modes (kept simple so pack.yaml checks stay quote-free):
 
-    (no arg) / --install   create the structure if missing (idempotent)
-    --check                exit 0 if the structure exists, else 1
+    (no arg) / --install   AUDIT first: if a memory system exists anywhere (global
+                           OR project-scoped), don't touch it; only create one if
+                           there genuinely isn't any.
+    --check                exit 0 if memory exists ANYWHERE known, else 1
+    --find                 print where memory lives (or the places searched)
     --check-wire           exit 0 if CLAUDE.md points at the memory index, else 1
     --wire                 make CLAUDE.md point at the memory index (idempotent)
 
-Home: $CLAUDE_HOME or ~/.claude ; memory in <home>/memory. (The env override lets
-tests/demos run against a throwaway home without touching real ~/.claude.)
+Discovery searches, in order: $CLAUDE_MEMORY_HOME, then <home>/memory (global),
+then <home>/projects/<hash>/memory (project-scoped -- where Claude Code usually
+keeps it). New systems are created at <home>/memory only if none is found. This
+prevents the "location mismatch" trap: reporting memory as missing and building a
+duplicate next to a working one. (home = $CLAUDE_HOME or ~/.claude.)
 
 Everything is idempotent: existing files are never overwritten.
 """
@@ -36,7 +42,29 @@ def base_dir() -> pathlib.Path:
 
 
 def mem_dir() -> pathlib.Path:
+    """The DEFAULT location to create a new memory system (global)."""
     return base_dir() / "memory"
+
+
+def candidate_dirs() -> "list[pathlib.Path]":
+    """Where a memory system might already live -- explicit override, global,
+    then any project-scoped folder (~/.claude/projects/<hash>/memory)."""
+    env = os.environ.get("CLAUDE_MEMORY_HOME")
+    if env:
+        return [pathlib.Path(env)]
+    dirs = [mem_dir()]
+    proj = base_dir() / "projects"
+    if proj.exists():
+        dirs += sorted(proj.glob("*/memory"))
+    return dirs
+
+
+def find_memory() -> "pathlib.Path | None":
+    """The first candidate that actually holds a MEMORY.md, else None."""
+    for d in candidate_dirs():
+        if (d / "MEMORY.md").exists():
+            return d
+    return None
 
 
 def claude_md() -> pathlib.Path:
@@ -107,6 +135,16 @@ add a RESOLVER row so it's findable.
 
 
 def install() -> int:
+    # Discover first -- never create a duplicate alongside an existing memory
+    # system (e.g. a project-scoped one). This is the "audit + find where it is,
+    # don't blindly make a new one" rule.
+    existing = find_memory()
+    if existing is not None:
+        print(f"found existing memory at {existing}")
+        print("not creating a duplicate. Audit it with:")
+        print("  python packs/memory/files/memory_doctor.py")
+        return 0
+
     m = mem_dir()
     m.mkdir(parents=True, exist_ok=True)
     here = pathlib.Path(__file__).resolve().parent
@@ -135,7 +173,20 @@ def install() -> int:
 
 
 def check() -> int:
-    return 0 if (mem_dir() / "MEMORY.md").exists() else 1
+    # Discovery-aware: memory found ANYWHERE known (global or project-scoped)
+    # counts as present. Prevents a false "missing" that would create a duplicate.
+    return 0 if find_memory() is not None else 1
+
+
+def find() -> int:
+    m = find_memory()
+    if m is not None:
+        print(f"memory found at: {m}")
+        return 0
+    print("no memory system found. Searched:")
+    for d in candidate_dirs():
+        print(f"  - {d}")
+    return 1
 
 
 def check_wire() -> int:
@@ -161,11 +212,13 @@ def main(argv: list[str]) -> int:
         return install()
     if mode == "--check":
         return check()
+    if mode == "--find":
+        return find()
     if mode == "--check-wire":
         return check_wire()
     if mode == "--wire":
         return wire()
-    print(f"unknown mode {mode!r}; expected --install/--check/--check-wire/--wire")
+    print(f"unknown mode {mode!r}; expected --install/--check/--find/--check-wire/--wire")
     return 2
 
 
