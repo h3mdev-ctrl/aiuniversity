@@ -358,7 +358,9 @@ Packs:
   credential files (.env, private keys) and *proves* it fires by piping a
   forbidden probe through the installed hook.
 - **gbrain-windows** — verify a tool is installed *and live*; choose **local**
-  (PGLite) or **supabase** (hosted).
+  (PGLite) or **supabase** (hosted). Also wires a **usage discipline** into CLAUDE.md
+  (capture ideas/entities as they come up, search the brain before researching,
+  backlink) so Claude *uses* the brain habitually instead of only when asked.
 - **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)
   or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
 - **autolearn** — a phantom-style wrap-up: a git post-commit hook captures every
