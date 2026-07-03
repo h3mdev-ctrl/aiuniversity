@@ -388,6 +388,13 @@ Next, in order:
     `monthly/` synthesis that every future session starts from — a compounding brain,
     not a notes folder. Reuses the `autolearn` drain (a scheduled rollup is just the
     drain pointed at notes instead of commits) — no new memory machinery.
+- **`shared-context` module (Layer 3)** — a shared, append-only **live-context log**
+  with a read-before-reply / append-after-turn invariant, so multiple Claude instances
+  (bridge, cloud, scheduled tasks, worktrees) coordinate instead of drifting. The one
+  memory layer we don't yet ship; specced in
+  [`docs/memory-layers.md`](docs/memory-layers.md), which also maps every existing pack
+  to the four memory time-horizons (independent convergence with a production 2-agent
+  stack that runs the same gbrain — strong validation the shape is right).
 - **Hand it to a friend.** Zero-help setup = the wedge is proven. This is the real
   test; everything so far just makes it possible.
 - **Live behavioural probes end-to-end** — memory's `recall-probe` and the wiki's
