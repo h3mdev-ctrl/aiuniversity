@@ -113,9 +113,17 @@ whose guidance keeps getting better.
 
 ## Where it starts: the foundation pack
 
-The most valuable pack isn't a single tool — it's the **foundation**: getting a
-newcomer's Claude set up *properly* for the long run. Six layers, each with a
-concrete check:
+Most packs set up *one tool*. The foundation pack sets up **Claude itself,
+properly, the first time** — the base layer everything else sits on. It's the
+"umbrella" pack you run *before* any specific tool, so a newcomer's Claude is
+durable and useful over months, not just working once.
+
+Why it's the most valuable pack: specific tools go stale fast (this month's brain,
+this week's helper), but the foundation is *timeless*. Get it right once and every
+session after benefits. It's the pack that captures what took you months to work
+out by hand.
+
+The full vision is **six layers**, each with a concrete check:
 
 - **Identity** — who you are and how Claude should talk to you.
 - **Memory that compounds** — notes that persist *and* surface at the right moment.
@@ -124,9 +132,62 @@ concrete check:
 - **Capabilities, actually switched on** — tools verified *live*, not just "installed."
 - **Durability** — backups, a decision log, a maintenance habit.
 
-Specific tools go stale fast — swappable pieces that plug into that foundation.
-But the **principles are timeless**. Package those once, well, and you've given a
-friend in an afternoon what took you months to work out by hand.
+### What it checks today
+
+Honest picture: the v1 foundation is a **working slice**, not all six layers at
+full depth yet. It runs three real checkpoints — and pulls the whole gbrain pack
+in as one of them:
+
+1. **Constitution** — is your global `CLAUDE.md` there? (the file that stops
+   Claude improvising against your setup)
+2. **Capabilities** — *run the gbrain pack right here* (a **module** step).
+3. **Durability** — is your `~/.claude/projects` folder there? (where per-project
+   memory compounds)
+
+Identity, memory, and guardrails are the next authoring pass — the format is
+ready for them; they just need writing.
+
+### How it runs — a pack that contains a pack
+
+Step 2 isn't a check, it's a pointer to another pack:
+
+```yaml
+  - id: layer-4-capabilities
+    instruction: set up your tools — install, connect, prove gbrain is live
+    module: gbrain-windows      # run this whole pack right here
+```
+
+When the engine hits that line it **opens the gbrain pack and runs its steps
+inline**, then comes back and continues. So one run of the foundation walks this
+whole sequence (real output from the golden-path run):
+
+```
+run: verify packs/foundation
+│
+├─ 1. layer-2-constitution        is ~/.claude/CLAUDE.md there?     ✓
+│
+├─ 2. layer-4-capabilities   "run the gbrain pack here"
+│        └─ opens gbrain-windows, runs its 4 steps inline:
+│             gbrain-windows/install          gbrain --version      ✓
+│             gbrain-windows/brain-reachable  gbrain list -n 1      ✓
+│             gbrain-windows/mcp-registered   claude mcp list       ✓
+│             gbrain-windows/activation-exam  gbrain query "…"      ✓
+│
+└─ 3. layer-5-durability          is ~/.claude/projects there?     ✓
+        ▼
+      PASS  (all 6 checkpoints green)
+```
+
+The gbrain steps come back labelled `gbrain-windows/…`, so if anything breaks you
+know **both which pack and which step** — the foundation doesn't just say
+"capabilities failed," it says `gbrain-windows/mcp-registered failed, here's the
+fix.` And it would *stop right there* — the durability check after it never runs
+— because there's no point checking later things past a broken foundation piece.
+
+That's the one idea that makes the foundation special: **it's a pack that contains
+packs.** The umbrella declares slots; real tool-packs (gbrain today, Obsidian
+next) drop in. Adding a capability is *filling in a `pack.yaml`* — no new code —
+while the timeless six-layer frame stays stable underneath.
 
 ---
 
