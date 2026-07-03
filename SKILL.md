@@ -124,6 +124,16 @@ design, so make it kind.
 
 ---
 
+## Autolearn reflection (the phantom close-out)
+
+When the autolearn pack is set up and there are commits in the queue
+(`phantom_autolearn.py --show-queue`), and the user asks you to wrap up / drain /
+reflect, **read `_phantom_workflow.md` in the memory folder FIRST.** It carries
+the 6-stage procedure and worked examples for what a durable lesson looks like
+versus what to skip. Do not reflect from scratch -- the workflow is there so you
+don't have to. Pipe your JSON to `--write-learning`, then `--clear-queue`, then
+run `memory_doctor.py` and confirm `VERDICT: HEALTHY`.
+
 ## Interview steps (e.g. the identity pack)
 
 Some steps need answers only the user has (their name, how they want you to talk

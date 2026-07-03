@@ -268,6 +268,34 @@ def drain() -> int:
     return 0
 
 
+def install_workflow() -> int:
+    """Drop phantom_workflow.md into the memory folder as _phantom_workflow.md
+    so the recipient's Claude has a concrete procedure to follow when reflecting.
+    """
+    mem = resolve_memory()
+    if mem is None:
+        if len(discover_memories()) > 1:
+            print("AMBIGUOUS: multiple memory systems -- pin CLAUDE_MEMORY_HOME")
+            return 3
+        print("no memory system found -- run the memory pack first (packs/memory)")
+        return 1
+    src = pathlib.Path(__file__).resolve().parent / "phantom_workflow.md"
+    if not src.exists():
+        print(f"missing source workflow doc at {src}")
+        return 1
+    dst = mem / "_phantom_workflow.md"
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"installed workflow guide at {dst}")
+    return 0
+
+
+def check_workflow() -> int:
+    mem = resolve_memory()
+    if mem is None:
+        return 1
+    return 0 if (mem / "_phantom_workflow.md").exists() else 1
+
+
 def selftest() -> int:
     # Prove the apply->consolidate path against an isolated throwaway memory.
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="autolearn_selftest_"))
@@ -299,6 +327,8 @@ def main(argv: list[str]) -> int:
     dispatch = {
         "--install-hook": install_hook,
         "--check-hook": check_hook,
+        "--install-workflow": install_workflow,
+        "--check-workflow": check_workflow,
         "--capture": capture,
         "--show-queue": show_queue,
         "--write-learning": write_learning,

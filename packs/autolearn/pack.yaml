@@ -27,6 +27,18 @@ steps:
       No single memory system found. Set one up first (packs/memory), or if you
       have several, pin CLAUDE_MEMORY_HOME to the right one.
 
+  - id: workflow-installed
+    instruction: >
+      Install the phantom close-out workflow guide next to your memory. This is
+      the concrete procedure Claude follows when reflecting on a captured commit
+      (the 6 stages with worked examples), so it doesn't have to derive one.
+    check:
+      type: command_succeeds
+      cmd: python packs/autolearn/files/phantom_autolearn.py --check-workflow
+    on_fail: >
+      Workflow guide not installed. Install (copies it into your memory folder):
+      python packs/autolearn/files/phantom_autolearn.py --install-workflow
+
   - id: hook-installed
     instruction: >
       Install a git post-commit hook so every commit is captured for a wrap-up

@@ -139,7 +139,30 @@ def test_selftest_passes(tmp_path):
     assert run("--selftest", home=tmp_path).returncode == 0
 
 
-def test_pack_loads_with_three_steps():
+def test_install_workflow_ships_the_guide(tmp_path):
+    setup_memory(tmp_path)
+    r = run("--install-workflow", home=tmp_path)
+    assert r.returncode == 0
+    dst = tmp_path / "memory" / "_phantom_workflow.md"
+    assert dst.exists()
+    # confirm the deep procedure landed, not an empty stub
+    text = dst.read_text(encoding="utf-8")
+    assert "The 6 stages" in text and "Worked examples" in text
+    assert run("--check-workflow", home=tmp_path).returncode == 0
+
+
+def test_install_workflow_refuses_when_ambiguous(tmp_path):
+    for name in ("C--a", "C--b"):
+        d = tmp_path / "projects" / name / "memory"
+        d.mkdir(parents=True)
+        (d / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    r = run("--install-workflow", home=tmp_path)
+    assert r.returncode != 0 and "AMBIGUOUS" in r.stdout
+
+
+def test_pack_loads_with_four_steps():
     pack = load_pack(REPO / "packs" / "autolearn" / "pack.yaml")
     assert pack.name == "autolearn"
-    assert [s.id for s in pack.steps] == ["memory-present", "hook-installed", "autolearn-works"]
+    assert [s.id for s in pack.steps] == [
+        "memory-present", "workflow-installed", "hook-installed", "autolearn-works",
+    ]
