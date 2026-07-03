@@ -22,6 +22,42 @@ the consolidation. Never block your whole nightly on the one part that needs a
 model -- most people should start structural-only and add the extract later, if
 ever.
 
+## What the deep-extract actually does, in plain terms
+
+Think of your brain's pages as a pile of raw notes -- meeting recaps, journal
+entries, code files, article summaries. The deep-extract is the step that reads
+through recent pages and pulls out **standalone, reusable claims** ("takes"):
+short, atomic facts/opinions that are worth surfacing again later, separated
+from the surrounding narrative they were buried in.
+
+Concrete example: say yesterday's daily note says
+
+> "Spent an hour on the breadth divergence script. Turns out the 200-day MA
+> lookback was silently including delisted tickers, which skewed the whole
+> stage count high. Fixed by filtering on `is_active` before the rolling calc.
+> Also chatted with Sam about the Q3 roadmap -- probably slipping two weeks."
+
+Structural-only dream will link this page into your graph and make it
+searchable by keyword/embedding -- useful, but you only "find" the lesson if
+you already know to search for it. The deep-extract instead lifts out:
+
+- *take:* "Breadth divergence stage counts were skewed high because the 200-day
+  MA lookback wasn't filtering delisted tickers -- always filter on `is_active`
+  before rolling calcs on ticker universes."
+- *take:* "Q3 roadmap is trending ~2 weeks late per a conversation with Sam."
+
+Those get graded (`grade_takes`), and if they clear a confidence bar, promoted
+into your brain as their own retrievable facts -- so next time you (or an
+agent) touch anything roadmap- or breadth-calc-related, the lesson surfaces
+even if you never think to search "delisted tickers." That's the benefit over
+not running it: **your notes stop being just an archive and start actively
+resurfacing lessons you didn't know to look for.**
+
+The cost of *not* running it: nothing breaks. You keep 100% of structural
+dream (links, embeddings, search, dedup) for free. You just don't get this
+"lesson resurfacing" layer -- you have to remember to search for things
+yourself, the way you always have.
+
 ## The "which model powers the extract" trap
 
 The deep-extract drives a multi-turn agentic subagent loop, which is much harder
@@ -42,6 +78,56 @@ The ladder, in order: **structural-only (free) -> a small hosted model for the
 extract -> a strong local model if/when one fits your GPU.** The deep-extract does
 NOT have to run locally, and it does NOT require codex.
 
+## Confirmed: `propose_takes` is hardcoded to Anthropic, not your `chat_model`
+
+Tested live (gbrain 0.42.53.0): the actual expensive phase of the deep-extract
+is called `propose_takes` -- it's the one that runs long (50s+ per cycle) and
+does the multi-turn "read a page, decide if there's a standalone take in it"
+loop described above. We pointed `chat_model` at a local Ollama model
+(`openai:llama3.1:8b-instruct-q4_K_M`, already installed and already proven
+reliable on other batch tasks) and re-ran `gbrain dream --dry-run`. Every one
+of `propose_takes`'s page attempts failed identically:
+
+```
+"extractor failed on daily/2026-07-03: Anthropic chat requires ANTHROPIC_API_KEY."
+```
+
+We also probed for a separate override (`gbrain config set takes_model ...`,
+`propose_model`, `ensemble_model`) -- none exist; gbrain rejected all three as
+unknown keys. **So as of this version, `propose_takes` ignores `chat_model`
+entirely and always calls Anthropic's API directly.** There is currently no
+way to run the real deep-extract on a local model, or on a non-Anthropic
+hosted model -- it's Anthropic-or-nothing for this specific phase. (A separate,
+lighter phase, `extract_facts`, DID honor the `chat_model` swap in testing --
+but it's not the expensive multi-turn one, and the doc's "deep-extract" advice
+below is about `propose_takes`.)
+
+This may change in a future gbrain release if a dedicated config key ships --
+worth re-checking after an upgrade rather than assuming this is permanent.
+
+## The cost/access trade-off, plainly
+
+Because `propose_takes` only speaks to Anthropic, turning on the deep-extract
+today means an **`ANTHROPIC_API_KEY` with pay-per-token API billing** -- this is
+a *separate* thing from a Claude.ai/Claude Code subscription (Free/Pro/Max
+plans do not include API access; API keys bill per token on their own metered
+account, typically at console.anthropic.com). Concretely:
+
+- **If you already pay for a Claude Code or Claude.ai plan:** that subscription
+  does NOT cover this. You'd need to separately create an API key and expect a
+  metered bill on top, sized to how much content dream chews through each
+  night (small dollars for a personal-scale brain doing an 8B-ish equivalent
+  model like Haiku, but not zero, and it compounds nightly).
+- **If you don't want a second, metered account:** skip the deep-extract.
+  Structural-only dream costs nothing and needs no key at all.
+
+The ladder, in order: **structural-only (free, no key needed) -> a small
+hosted model + pay-per-use API key for the extract (only real option today)
+-> a strong local model, if/when gbrain adds a way to route `propose_takes`
+away from Anthropic.** The deep-extract does NOT have to run locally in
+principle, and it does NOT require codex -- but in practice, right now, it
+does require an Anthropic API key and its associated spend.
+
 ## Two Windows gotchas that cost an hour each
 
 1. **Use the `openai:` provider prefix, NOT `ollama:`, for the chat model.**
@@ -61,8 +147,13 @@ NOT have to run locally, and it does NOT require codex.
 ## Bottom line
 
 The dream cycle is optional, and its valuable half (structural consolidation) is
-free and model-free. Only reach for the LLM deep-extract if you have a reliable
-chat model -- and on Windows the reliable cheap path is a small hosted model, not
-a local 8B, and not a dependency on codex. If you don't have codex, you're not
-missing anything: run structural-only, or point the extract at a cheap hosted
-model.
+free and model-free. The LLM deep-extract's payoff is real -- it turns buried
+one-off lessons in your notes into standalone facts that resurface later
+without you having to remember to search for them -- but as of gbrain
+0.42.53.0, unlocking it means an `ANTHROPIC_API_KEY` on a pay-per-use billing
+account (not covered by a Claude Code/Claude.ai subscription), because
+`propose_takes` is hardcoded to Anthropic and ignores `chat_model`. If you
+don't want that second metered account, you're not missing structural value --
+run structural-only. If a few cents/night of API spend is fine for
+"lessons find me instead of me finding them," add the key and point
+`chat_model` at `anthropic:claude-haiku-4-5`.
