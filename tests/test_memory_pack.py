@@ -230,12 +230,16 @@ def test_doctor_flags_a_dark_file(tmp_path):
     assert "dark" in r.stdout
 
 
-def test_doctor_flags_missing_frontmatter(tmp_path):
+def test_doctor_frontmatter_is_advisory_not_blocking(tmp_path):
+    # a LINKED (reachable) file with no frontmatter is an advisory, not a block --
+    # a mature memory accumulates older files and must still audit HEALTHY.
     run("setup_memory.py", home=tmp_path)
-    (tmp_path / "memory" / "reference_nofm.md").write_text("no frontmatter here\n", encoding="utf-8")
+    mem = tmp_path / "memory"
+    (mem / "feedback_untagged.md").write_text("just a body, no frontmatter\n", encoding="utf-8")
+    (mem / "CATALOG.md").write_text("# Catalog\n\n- feedback_untagged.md -- x\n", encoding="utf-8")
     r = run("memory_doctor.py", home=tmp_path)
-    assert r.returncode == 1
-    assert "frontmatter" in r.stdout
+    assert r.returncode == 0 and "HEALTHY" in r.stdout   # advisory does NOT flip verdict
+    assert "frontmatter" in r.stdout                      # but it's still surfaced
 
 
 def test_doctor_missing_index(tmp_path):

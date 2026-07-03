@@ -9,11 +9,15 @@ Checks STRUCTURE, not content:
      memory nothing routes to is invisible in practice. (Splitting a domain into
      an INDEX_*.md is the correct way to keep MEMORY.md small, so a file linked
      only from a sub-index is reachable, NOT dark.)
-  3. The index stays short (routing only) -- warn over the line budget.
-  4. Every memory file has frontmatter: name, description, type.
+  3. (advisory) The index stays short (routing only) -- nudge over the budget.
+  4. (advisory) Every memory file has frontmatter: name, description, type.
+
+Only DARK files flip the verdict (a memory nothing routes to is genuinely
+broken). Frontmatter + size are quality nudges -- printed as advisories but they
+do NOT fail the audit, so a mature memory with a few older files stays HEALTHY.
 
 Prints one line per issue, then `VERDICT: HEALTHY` or `VERDICT: ISSUES`.
-Exit 0 if healthy, 1 if issues.
+Exit 0 if healthy (advisories allowed), 1 if any dark file.
 
 Home: $CLAUDE_HOME or ~/.claude ; memory lives in <home>/memory. (The env override
 lets tests and demos run against a throwaway home without touching real ~/.claude.)
@@ -112,33 +116,41 @@ def run() -> int:
     index = m / "MEMORY.md"
     index_text = index.read_text(encoding="utf-8")   # size budget: MEMORY.md only
     reachable_via = routing_text(m)                  # reachability: all routing tiers
-    issues: list[str] = []
+
+    hard: list[str] = []   # genuinely broken -> flips the verdict
+    soft: list[str] = []   # quality nudges -> printed, but do NOT block
 
     for p in sorted(m.glob("*.md")):
         if not is_memory_file(p):
             continue
-        # reachable? the slug/filename must appear in ANY routing tier -- MEMORY.md,
-        # a Tier-2 INDEX_*.md, or CATALOG.md. (Splitting a domain into a sub-index
-        # is the CORRECT way to keep MEMORY.md small; it must not read as "dark".)
+        # HARD: reachable? the slug/filename must appear in ANY routing tier --
+        # MEMORY.md, a Tier-2 INDEX_*.md, or CATALOG.md. Splitting a domain into a
+        # sub-index is the CORRECT way to keep MEMORY.md small; it isn't "dark".
         if p.stem not in reachable_via and p.name not in reachable_via:
-            issues.append(f"[dark] {p.name} is not linked from MEMORY.md / any INDEX_*.md / CATALOG.md (unreachable)")
+            hard.append(f"[dark] {p.name} is not linked from MEMORY.md / any INDEX_*.md / CATALOG.md (unreachable)")
+        # SOFT: frontmatter is a quality nudge, not a breakage. A mature memory
+        # accumulates older files; flag them to tag, don't fail the audit.
         if not has_frontmatter(p.read_text(encoding="utf-8")):
-            issues.append(f"[frontmatter] {p.name} missing name/description/type frontmatter")
+            soft.append(f"[frontmatter] {p.name} missing name/description/type frontmatter (advisory)")
 
     line_count = len(index_text.splitlines())
     if line_count > INDEX_LINE_BUDGET:
-        issues.append(
+        soft.append(
             f"[size] MEMORY.md is {line_count} lines (budget {INDEX_LINE_BUDGET}). "
             f"Keep it routing-only: split a domain's rows into a Tier-2 sub-index "
             f"(e.g. INDEX_<domain>.md) and leave ONE router row pointing at it. "
-            f"Never trim routing to save space -- that makes memories dark."
+            f"Never trim routing to save space -- that makes memories dark. (advisory)"
         )
 
-    for issue in issues:
-        print(issue)
-    if issues:
+    for msg in hard:
+        print(msg)
+    for msg in soft:
+        print(msg)
+    if hard:
         print("VERDICT: ISSUES")
         return 1
+    if soft:
+        print(f"({len(soft)} advisory item(s) above -- quality nudges, not blocking)")
     print("VERDICT: HEALTHY")
     return 0
 
