@@ -29,6 +29,11 @@ Unattended drain safety (why this is OK to schedule):
   * The reflection model is a cheap tier by default -- $AUTOLEARN_DRAIN_MODEL
     (default claude-haiku-4-5); a one-shot structured reflection doesn't need Opus.
 
+On Windows the headless drain + Task Scheduler hit real traps (npm .cmd shims,
+cmd.exe arg mangling, minimal scheduler PATH, PowerShell 2>&1). Each one and its
+fix is in windows_gotchas.md next to this file -- read it before debugging a
+"just fails" on Windows.
+
 Modes:
     --install-hook     install a git post-commit hook (calls --capture) in the cwd repo
     --check-hook       exit 0 if the autolearn hook is installed, else 1

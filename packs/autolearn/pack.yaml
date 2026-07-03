@@ -12,6 +12,11 @@
 # you want Claude to keep learning from. Files into the memory the memory pack set
 # up; refuses to guess if several memories exist (pin CLAUDE_MEMORY_HOME).
 #
+# ON WINDOWS: the unattended --drain shells out to `claude -p` and can run under
+# Task Scheduler. Both hit Windows-specific traps (npm .cmd shims, cmd.exe arg
+# mangling, minimal scheduler PATH, PowerShell 2>&1). Every one we hit + its fix
+# is in files/windows_gotchas.md -- read it before debugging a "just fails" on Win.
+#
 # Commands run from the repo root.
 name: autolearn
 version: 0.1.0

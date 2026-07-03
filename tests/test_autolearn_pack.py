@@ -382,6 +382,25 @@ def test_install_workflow_refuses_when_ambiguous(tmp_path):
     assert r.returncode != 0 and "AMBIGUOUS" in r.stdout
 
 
+def test_ships_windows_gotchas_doc():
+    # the real Windows errors we hit wiring the drain must travel WITH the pack,
+    # so a student on Windows starts from the fix, not the opaque error
+    doc = REPO / "packs" / "autolearn" / "files" / "windows_gotchas.md"
+    assert doc.exists()
+    text = doc.read_text(encoding="utf-8").lower()
+    # the load-bearing traps + their fixes must be present
+    assert "winerror 2" in text and "shutil.which" in text        # npm .cmd shim
+    assert "stdin" in text                                          # arg mangling fix
+    assert "task scheduler" in text and "path" in text             # minimal PATH
+    assert "2>&1" in text                                           # powershell native stderr
+    assert "git init" in text                                       # rollback prerequisite
+
+
+def test_pack_header_points_to_windows_gotchas():
+    pack = (REPO / "packs" / "autolearn" / "pack.yaml").read_text(encoding="utf-8")
+    assert "windows_gotchas.md" in pack
+
+
 def test_pack_loads_with_four_steps():
     pack = load_pack(REPO / "packs" / "autolearn" / "pack.yaml")
     assert pack.name == "autolearn"
