@@ -1,0 +1,43 @@
+# foundation -- set up Claude properly the first time (the umbrella pack).
+#
+# The flagship: the layers that make Claude durable and useful over months, not
+# just working once. Layer 4 (capabilities) declares a MODULE SLOT and threads
+# the real gbrain-windows pack through it -- proving composition against a real
+# module, which is the whole point of this pack existing.
+#
+# v1 scope: this is a working slice, not all six layers at full depth. It proves
+# the umbrella + a real module run end to end. Identity/memory/guardrails layers
+# (and their behavioural cold-recall probes) are the next authoring pass.
+name: foundation
+version: 0.1.0
+steps:
+  - id: layer-2-constitution
+    instruction: >
+      Your constitution: a global CLAUDE.md that tells Claude your hard rules and
+      your environment up front, so it follows a known path instead of guessing.
+    check:
+      type: command_succeeds
+      cmd: |
+        python -c "import pathlib,sys; sys.exit(0 if (pathlib.Path.home()/'.claude'/'CLAUDE.md').exists() else 1)"
+    on_fail: >
+      No ~/.claude/CLAUDE.md found. Create it with your environment (OS, shell)
+      and any hard rules -- even a few lines beats nothing. It is the single file
+      that stops Claude improvising against your setup.
+
+  - id: layer-4-capabilities
+    instruction: >
+      Your capabilities: the tools Claude can actually use. This runs the gbrain
+      module end to end -- install it, connect it, and prove it is live.
+    module: gbrain-windows
+
+  - id: layer-5-durability
+    instruction: >
+      Durability: the projects folder where Claude's per-project memory compounds
+      over time, so it improves instead of restarting from scratch each session.
+    check:
+      type: command_succeeds
+      cmd: |
+        python -c "import pathlib,sys; sys.exit(0 if (pathlib.Path.home()/'.claude'/'projects').exists() else 1)"
+    on_fail: >
+      No ~/.claude/projects folder yet. It appears once you've run Claude Code in
+      a project; run a session in a project first, then re-check.

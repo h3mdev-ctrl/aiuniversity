@@ -1,0 +1,69 @@
+# gbrain-on-Windows -- get gbrain installed, connected, and actually LIVE.
+#
+# Grounded in Andrew's real footgun notes: the Supabase pooler-URL trap (direct
+# host uses IPv6 and times out on Windows) and the "wasn't even activated" MCP
+# gap (it looked set up, it wasn't, nothing said so). Every check runs a REAL
+# executable (gbrain / claude), so it works under cmd.exe -- the shell the runner
+# uses on Windows -- not just bash.
+#
+# Design note: we deliberately do NOT gate on `gbrain doctor`'s overall status.
+# On a working machine doctor can report "unhealthy" purely from content-sync
+# noise while gbrain is perfectly usable. The pack checks USABILITY, not a
+# health score (the presence-vs-behavioural rule).
+name: gbrain-windows
+version: 0.1.0
+steps:
+  - id: install
+    instruction: >
+      Install gbrain and confirm the command runs. On Windows gbrain installs to
+      C:\Users\<you>\.bun\bin -- that folder must be on your PATH.
+    check:
+      type: contains
+      cmd: gbrain --version
+      expect: gbrain
+    on_fail: >
+      "command not found" means gbrain isn't on your PATH. On Windows it lives in
+      C:\Users\<you>\.bun\bin. Add that folder to PATH, open a NEW terminal, and
+      run `gbrain --version` again.
+
+  - id: brain-reachable
+    instruction: >
+      Prove gbrain can reach your brain database. This one check covers both
+      "is your config valid" and "does the database connect" -- because a bad
+      config or a wrong database URL both fail right here.
+    check:
+      type: command_succeeds
+      cmd: gbrain list -n 1
+    on_fail: >
+      gbrain can't reach the database. On Windows this is almost always the URL:
+      use the Supabase POOLER url (host like aws-0-...pooler.supabase.com:6543),
+      NOT the direct db.<project>.supabase.co host -- the direct host uses IPv6
+      and times out on most Windows networks. Re-run
+      `gbrain init --supabase --url <pooler-url>` with the pooler URL.
+
+  - id: mcp-registered
+    instruction: >
+      Confirm Claude can actually reach gbrain's tools. THIS is the "is it even
+      activated?" check -- the thing that used to fail silently.
+    check:
+      type: contains
+      cmd: claude mcp list
+      expect: gbrain
+    on_fail: >
+      gbrain isn't registered with Claude, so Claude can't call it. Register it
+      (user scope, stdio transport): claude mcp add gbrain -s user -- gbrain serve
+      Then `claude mcp list` should show a connected gbrain line.
+
+  - id: activation-exam
+    instruction: >
+      The real test: run a real question through gbrain's full answer pipeline
+      (embeddings + database + ranking). Passing this means gbrain is genuinely
+      live -- not merely installed.
+    check:
+      type: command_succeeds
+      cmd: |
+        gbrain query "trading psychology" --no-expand
+    on_fail: >
+      gbrain answered earlier steps but the query pipeline errored. Usually
+      embeddings aren't built or the brain is unreachable. Run `gbrain doctor`
+      and look for an embeddings or connection warning, then fix that and retry.
