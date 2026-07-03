@@ -17,10 +17,12 @@ Data + deterministic matcher + thin agent wrapper:
 - `runner/` -- the only thing that decides PASS/FAIL, so the answer is the same
   every time.
   - `matcher.py` -- pure PASS/FAIL for one check (the deterministic core).
-  - `verify.py` -- *(next)* reads a pack, runs each check, escape-hatch loop.
-- `SKILL.md` -- *(next)* the teach / verify / remediate wrapper (all the talking).
+  - `verify.py` -- reads a pack, runs each check, escape-hatch loop.
+  - `cli.py` -- the command SKILL.md calls (steps / verify / remediate, JSON out).
+- `SKILL.md` -- the teach / verify / remediate wrapper (all the talking).
 
-Full plan: `~/.gstack/projects/h3mdev-ctrl-PathofTrading/2026-07-03-skill-packs-eng-plan.md`
+The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & why)
+-> [ceo-plan](docs/ceo-plan.md) (scope) -> [eng-plan](docs/eng-plan.md) (architecture + build order).
 
 ## Build status
 
