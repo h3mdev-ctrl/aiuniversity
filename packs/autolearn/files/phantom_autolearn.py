@@ -255,6 +255,79 @@ def _slugify(name: str) -> str:
     return s.strip("-") or "learning"
 
 
+# --- deterministic validation gates (NO model needed) -----------------------
+# Phantom deleted their LLM judge panel ("cost, no signal") in favour of
+# deterministic invariants. We do the same: these gates are pure code, so the
+# pack has zero local-model dependency. The SEMANTIC judgment (is this durable,
+# a rule not an episode) is done by the Claude that's reflecting -- it has the
+# session context the gates never will. A cross-model second opinion is optional
+# and only worth it for high-stakes edits (see phantom_workflow.md).
+
+import re as _re  # noqa: E402
+
+_CRED_PATTERNS = [
+    r"sk-ant-[A-Za-z0-9_\-]{8,}",                 # Anthropic keys
+    r"AKIA[0-9A-Z]{16}",                          # AWS access key id
+    r"gh[pousr]_[A-Za-z0-9]{20,}",                # GitHub tokens
+    r"xox[baprs]-[A-Za-z0-9-]{10,}",              # Slack tokens
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",        # private key blocks
+    r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{6,}",  # JWTs
+    r"(?i:\b(?:api[_-]?key|secret|password|passwd|bearer|access[_-]?token)\b)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{16,}",
+]
+_CRED_RE = _re.compile("|".join(_CRED_PATTERNS))
+
+MAX_BODY_LINES = 40
+MAX_BODY_CHARS = 3000
+_PLACEHOLDER_BODIES = {"", "(add the lesson)"}
+
+
+def validate_learning(learning: dict, mem: pathlib.Path) -> "list[tuple[str, str]]":
+    """Return a list of (severity, message). severity is 'HARD' (block) or 'SOFT'
+    (warn). Pure, deterministic, model-free."""
+    issues: list[tuple[str, str]] = []
+    name = (learning.get("name") or "").strip()
+    desc = (learning.get("description") or "").strip()
+    body = (learning.get("body") or "").strip()
+    ltype = learning.get("type", "feedback")
+
+    if not name:
+        issues.append(("HARD", "missing `name`"))
+    if not desc:
+        issues.append(("HARD", "missing `description` (the triggering moment)"))
+    if body in _PLACEHOLDER_BODIES:
+        issues.append(("HARD", "body is empty/placeholder -- nothing durable to file"))
+    if ltype not in ("feedback", "reference"):
+        issues.append(("SOFT", f"type {ltype!r} not feedback/reference (coerced to feedback)"))
+
+    # credential leak -- scan everything that would land on disk
+    blob = f"{name}\n{desc}\n{body}"
+    if _CRED_RE.search(blob):
+        issues.append(("HARD", "looks like it contains a credential/secret -- refusing to write it into memory"))
+
+    # size bounds -- keep memory files small, bound index growth
+    if len(body.splitlines()) > MAX_BODY_LINES or len(body) > MAX_BODY_CHARS:
+        issues.append(("HARD", f"body too long ({len(body.splitlines())} lines) -- distil to the rule (<= {MAX_BODY_LINES} lines)"))
+
+    # balanced code fences (an odd count breaks rendering + the doctor)
+    if blob.count("```") % 2 != 0:
+        issues.append(("HARD", "unbalanced ``` code fences"))
+
+    # duplicate -- the file already exists; updating by hand beats overwriting
+    if name:
+        slug = _slugify(name)
+        if (mem / f"{ltype if ltype in ('feedback', 'reference') else 'feedback'}_{slug}.md").exists():
+            issues.append(("HARD", f"a memory named {slug!r} already exists -- update it by hand instead of overwriting"))
+        elif slug in (mem / "MEMORY.md").read_text(encoding="utf-8") if (mem / "MEMORY.md").exists() else False:
+            issues.append(("SOFT", f"{slug!r} already appears in MEMORY.md -- possible near-duplicate"))
+
+    return issues
+
+
+def _print_issues(issues: "list[tuple[str, str]]") -> None:
+    for sev, msg in issues:
+        print(f"  [{sev}] {msg}")
+
+
 def write_learning_to(mem: pathlib.Path, learning: dict) -> str:
     ltype = learning.get("type", "feedback")
     if ltype not in ("feedback", "reference"):
@@ -298,9 +371,39 @@ def write_learning() -> int:
     if not learning.get("should_write", True):
         print("learning marked should_write=false -- nothing filed")
         return 0
+    issues = validate_learning(learning, mem)
+    hard = [i for i in issues if i[0] == "HARD"]
+    if issues:
+        _print_issues(issues)
+    if hard:
+        print("REFUSED: deterministic gate blocked this write (fix the HARD issues above)")
+        return 4
     fname = write_learning_to(mem, learning)
     print(f"filed {fname} into {mem}")
     return 0
+
+
+def validate() -> int:
+    """Run the deterministic gates on a learning (stdin JSON) without writing.
+    Exit 0 if it would be accepted, 4 if a HARD gate blocks it."""
+    mem = resolve_memory()
+    if mem is None:
+        if len(discover_memories()) > 1:
+            print("AMBIGUOUS: multiple memory systems -- pin CLAUDE_MEMORY_HOME")
+            return 3
+        print("no memory system found -- run the memory pack first (packs/memory)")
+        return 1
+    try:
+        learning = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as exc:
+        print(f"--validate expects one learning JSON on stdin: {exc}")
+        return 2
+    issues = validate_learning(learning, mem)
+    if not issues:
+        print("OK: passes the deterministic gates")
+        return 0
+    _print_issues(issues)
+    return 4 if any(sev == "HARD" for sev, _ in issues) else 0
 
 
 # --- unattended reflection (headless) ---------------------------------------
@@ -413,6 +516,7 @@ def main(argv: list[str]) -> int:
         "--drain-due": drain_due,
         "--nudge": nudge,
         "--write-learning": write_learning,
+        "--validate": validate,
         "--clear-queue": clear_queue,
         "--drain": drain,
         "--selftest": selftest,

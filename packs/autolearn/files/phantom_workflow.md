@@ -72,19 +72,37 @@ Rules of thumb:
 - **Only ONE lesson per commit at most.** If a commit taught two things, pick the
   one whose trigger fires more often.
 
-### 4. Validate -- the durability test
+### 4. Validate -- two layers, and NO model required
 
-Before setting `should_write: true`, ask:
-- **Is this a RULE or an EPISODE?** Rules ("in situation Y, always X") are
-  durable; episodes ("we did X this one time") are not.
-- **Would a fresh Claude in a new session actually hit the trigger?** If the
-  trigger is impossibly narrow, the memory is dark on arrival.
-- **Do we already have a similar memory?** Check MEMORY.md and the "Learned"
-  section. If there's a near-duplicate, prefer UPDATING that memory over
-  adding a new one (`should_write: false`, do the update by hand instead).
+Validation is split by what each layer is actually good at. This is the deliberate
+lesson from phantom, which deleted its LLM judge panel ("cost, no signal") for
+deterministic checks. You need no local model for any of this.
 
-If any answer is no, set `should_write: false`. That is a real answer, not a
-failure.
+**Layer 1 -- deterministic gates (automatic, pure code).** `--write-learning`
+runs these for you and REFUSES the write on any HARD failure:
+- credential/secret scan (won't let a key from a diff land in memory),
+- size bound (body <= 40 lines -- distil to the rule),
+- duplicate slug (a memory by that name exists -> update by hand, don't overwrite),
+- balanced code fences + required fields.
+You can dry-run them: `... --validate` (same JSON on stdin, writes nothing).
+
+**Layer 2 -- your semantic judgment (you have the context; a judge model does not).**
+This is the part only the reflecting Claude can do well, because you were in the
+session. Ask:
+- **Is this a RULE or an EPISODE?** Rules ("in situation Y, always X") are durable;
+  episodes ("we did X once") are not.
+- **Would a fresh Claude actually hit the trigger?** Impossibly narrow -> dark on
+  arrival.
+- **Near-duplicate of an existing memory?** Prefer UPDATING it (`should_write:
+  false`, edit by hand) over adding a rival.
+
+If any Layer-2 answer is no, set `should_write: false`. That is a real answer.
+
+**Optional -- cross-model second opinion.** ONLY for high-stakes edits (a change
+to a hard rule, a security/guardrail memory) AND only if you happen to have a
+second model handy (a local Ollama panel, another API). It is NOT part of the
+normal flow and NOT required -- for routine lessons the deterministic gates plus
+your own judgment are the whole gate.
 
 ### 5. Apply -- pipe the JSON to --write-learning
 
@@ -94,7 +112,10 @@ Only after Validate passes. The command:
 echo '<the JSON>' | python packs/autolearn/files/phantom_autolearn.py --write-learning
 ```
 
-If it prints `filed <name>.md into <path>` you're through.
+If it prints `filed <name>.md into <path>` you're through. If it prints `REFUSED`,
+a deterministic gate blocked it (a secret in the body, a duplicate name, an
+oversized body, unbalanced fences). Fix the named issue and retry -- never force
+past a HARD gate.
 
 ### 6. Consolidate -- confirm and clear
 

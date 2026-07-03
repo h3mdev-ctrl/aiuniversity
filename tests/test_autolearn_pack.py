@@ -118,6 +118,66 @@ def test_write_learning_should_write_false_files_nothing(tmp_path):
     assert not (tmp_path / "memory" / "feedback_x.md").exists()
 
 
+def _good_learning(**over):
+    base = {"should_write": True, "type": "feedback", "name": "a-good-lesson",
+            "description": "when you're about to X", "body": "do Y. **Why:** Z. **How to apply:** W."}
+    base.update(over)
+    return json.dumps(base)
+
+
+def test_gate_blocks_a_credential_in_the_body(tmp_path):
+    setup_memory(tmp_path)
+    r = run("--write-learning", home=tmp_path,
+            stdin=_good_learning(body="use this key: sk-ant-abcdef123456789 to auth"))
+    assert r.returncode == 4 and "credential" in r.stdout.lower()
+    assert not (tmp_path / "memory" / "feedback_a-good-lesson.md").exists()
+
+
+def test_gate_blocks_oversized_body(tmp_path):
+    setup_memory(tmp_path)
+    big = "\n".join(f"line {i}" for i in range(60))
+    r = run("--write-learning", home=tmp_path, stdin=_good_learning(body=big))
+    assert r.returncode == 4 and "too long" in r.stdout
+
+
+def test_gate_blocks_placeholder_body(tmp_path):
+    setup_memory(tmp_path)
+    r = run("--write-learning", home=tmp_path, stdin=_good_learning(body="(add the lesson)"))
+    assert r.returncode == 4
+
+
+def test_gate_blocks_duplicate_slug(tmp_path):
+    setup_memory(tmp_path)
+    assert run("--write-learning", home=tmp_path, stdin=_good_learning()).returncode == 0
+    r = run("--write-learning", home=tmp_path, stdin=_good_learning())  # again, same name
+    assert r.returncode == 4 and "already exists" in r.stdout
+
+
+def test_gate_blocks_unbalanced_fences(tmp_path):
+    setup_memory(tmp_path)
+    r = run("--write-learning", home=tmp_path, stdin=_good_learning(body="do X\n```\nunclosed"))
+    assert r.returncode == 4 and "fence" in r.stdout
+
+
+def test_validate_mode_passes_a_good_learning(tmp_path):
+    setup_memory(tmp_path)
+    r = run("--validate", home=tmp_path, stdin=_good_learning())
+    assert r.returncode == 0 and "OK" in r.stdout
+    assert not (tmp_path / "memory" / "feedback_a-good-lesson.md").exists()  # dry run: no write
+
+
+def test_gate_does_not_block_a_normal_lesson(tmp_path):
+    # regression: the kind of lesson we actually file must sail through
+    setup_memory(tmp_path)
+    r = run("--write-learning", home=tmp_path, stdin=json.dumps(
+        {"should_write": True, "type": "feedback", "name": "fail-loud-on-ambiguity",
+         "description": "when you're about to auto-resolve a lookup with more than one match",
+         "body": "If a tool finds >1 candidate, refuse to guess -- list all, exit non-zero, name the pin. "
+                 "**Why:** silent guessing yields false 'it's fine' verdicts. **How to apply:** on len>1, "
+                 "print all and require an explicit pin."}))
+    assert r.returncode == 0
+
+
 def test_write_learning_requires_memory(tmp_path):
     r = run("--write-learning", home=tmp_path, stdin=json.dumps({"should_write": True, "name": "x", "body": "y"}))
     assert r.returncode == 1 and "no memory" in r.stdout
