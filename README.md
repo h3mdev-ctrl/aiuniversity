@@ -376,6 +376,18 @@ Next, in order:
   prerequisites and branches, instead of a hard-coded foundation. Captured in
   [`docs/skill-tree.md`](docs/skill-tree.md); a presentation layer over the
   `modules:` primitive, not new engine machinery.
+- **Knowledge / ingest branch** — planned pack modules that turn sources into
+  compounding memory (specced in
+  [`docs/planned-knowledge-ingest.md`](docs/planned-knowledge-ingest.md)):
+  - **`x-post-ingest`** — pull a tracked X account / saved thread → distilled,
+    attributed notes filed into memory/gbrain/wiki.
+  - **`youtube-transcriber`** — transcribe a video (local whisper or transcript
+    source) → distilled notes → memory, keeping the transcript, dropping the audio.
+  - The payoff isn't the ingest, it's the **weekly → monthly rollup rhythm**: when
+    you're learning a subject, atomic notes roll into `weekly/` wrap-ups and then a
+    `monthly/` synthesis that every future session starts from — a compounding brain,
+    not a notes folder. Reuses the `autolearn` drain (a scheduled rollup is just the
+    drain pointed at notes instead of commits) — no new memory machinery.
 - **Hand it to a friend.** Zero-help setup = the wedge is proven. This is the real
   test; everything so far just makes it possible.
 - **Live behavioural probes end-to-end** — memory's `recall-probe` and the wiki's

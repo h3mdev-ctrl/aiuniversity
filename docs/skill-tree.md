@@ -53,8 +53,16 @@ composition primitive, NOT new engine machinery. That keeps it cheap.
    KNOWLEDGE                 TRADING                    DEVEX          branches you choose
    gbrain ✓                 (edge packs) ○              (ship/qa) ○
    obsidian ○
+   x-post-ingest ○
+   youtube-transcriber ○
                  ✓ built   ○ planned   —   prereqs gate what unlocks
 ```
+
+The KNOWLEDGE branch grows an **ingest sub-branch** — `x-post-ingest` and
+`youtube-transcriber` turn sources into compounding memory via a weekly→monthly
+rollup rhythm. Specced in [planned-knowledge-ingest.md](planned-knowledge-ingest.md);
+both require `memory` and reuse the `autolearn` drain, so they sit downstream of the
+trunk.
 
 ## Design decisions to resolve when we develop it
 
