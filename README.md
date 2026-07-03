@@ -234,7 +234,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 89 tests, all green
+python -m pytest tests/ -q      # 98 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -258,6 +258,13 @@ python -m runner.cli remediate packs/obsidian-wiki --variant hosted      # also 
 
 `steps --variant <x>` shows exactly what that choice will run before you commit.
 Leave `--variant` off to use the pack's default (the simpler, no-account option).
+
+**Autolearn from every commit** (a git hook captures commits; lessons get filed
+into memory at wrap-up — run from inside a git repo):
+
+```bash
+python -m runner.cli remediate packs/autolearn
+```
 
 **Set up a free, publishable knowledge wiki** (Obsidian vault → Quartz → free host,
 linked into memory):
@@ -340,7 +347,7 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 89 tests green.
+teach/verify/remediate skill — 98 tests green.
 
 Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
@@ -350,6 +357,9 @@ Packs:
   (PGLite) or **supabase** (hosted).
 - **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)
   or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
+- **autolearn** — a phantom-style wrap-up: a git post-commit hook captures every
+  commit, and a reflection pass files durable lessons into memory (new memory +
+  resolver row). Self-improvement companion to the memory pack.
 - **foundation** — the umbrella; threads memory + gbrain through as modules.
 
 Every setup pack ships **worked examples modeled on a real, heavily-used system**

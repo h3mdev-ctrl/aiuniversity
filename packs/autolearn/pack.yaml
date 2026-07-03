@@ -1,0 +1,51 @@
+# autolearn -- wrap up every commit and autolearn into memory (phantom close-out).
+#
+# The self-improvement companion to the memory pack. A git post-commit hook
+# captures each commit; a reflection pass (Claude at wrap-up, or headless
+# `claude -p` via --drain) extracts durable lessons and files them into memory as
+# new memories + RESOLVER rows -- so the same mistake isn't repeated next session.
+#
+# The 6 phantom stages: Observe (the diff) -> Critique/Generate (the lesson) ->
+# Validate (skip trivial) -> Apply (write the memory) -> Consolidate (the doctor).
+#
+# Standalone (needs a git repo), NOT forced into the foundation -- add it to a repo
+# you want Claude to keep learning from. Files into the memory the memory pack set
+# up; refuses to guess if several memories exist (pin CLAUDE_MEMORY_HOME).
+#
+# Commands run from the repo root.
+name: autolearn
+version: 0.1.0
+steps:
+  - id: memory-present
+    instruction: >
+      Autolearn files lessons INTO your memory, so a single memory system must
+      exist first. (If you don't have one, run the memory pack.)
+    check:
+      type: command_succeeds
+      cmd: python packs/memory/files/setup_memory.py --check
+    on_fail: >
+      No single memory system found. Set one up first (packs/memory), or if you
+      have several, pin CLAUDE_MEMORY_HOME to the right one.
+
+  - id: hook-installed
+    instruction: >
+      Install a git post-commit hook so every commit is captured for a wrap-up
+      reflection. Run this from INSIDE the repo you want Claude to learn from.
+    check:
+      type: command_succeeds
+      cmd: python packs/autolearn/files/phantom_autolearn.py --check-hook
+    on_fail: >
+      No autolearn hook yet. Install it (from inside your git repo):
+      python packs/autolearn/files/phantom_autolearn.py --install-hook
+
+  - id: autolearn-works
+    instruction: >
+      Confirm the learn pipeline works end to end: a lesson can be filed into
+      memory, reachable from the index, without breaking the audit. (This runs an
+      isolated self-test -- it does not touch your real memory.)
+    check:
+      type: command_succeeds
+      cmd: python packs/autolearn/files/phantom_autolearn.py --selftest
+    on_fail: >
+      The autolearn write path failed (see output). Usually memory is missing or
+      ambiguous -- run `setup_memory.py --check`, or pin CLAUDE_MEMORY_HOME.
