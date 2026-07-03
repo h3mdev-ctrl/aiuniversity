@@ -322,6 +322,10 @@ a compounding memory + resolver index from scratch), both threaded through the
 Next, in order:
 - **The Obsidian LLM-wiki module** — an LLM-queryable knowledge base; adding it
   should be mostly *filling in a `pack.yaml`*.
+- **A skill tree** — modules as a chooseable, RPG-style progression with
+  prerequisites and branches, instead of a hard-coded foundation. Captured in
+  [`docs/skill-tree.md`](docs/skill-tree.md); a presentation layer over the
+  `modules:` primitive, not new engine machinery.
 - **Hand it to a friend.** Zero-help setup = the wedge is proven. This is the real
   test; everything so far just makes it possible.
 - **The live recall probe end-to-end** — memory's behavioural `recall-probe` step
