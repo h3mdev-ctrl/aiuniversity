@@ -91,8 +91,10 @@ def run() -> int:
     line_count = len(index_text.splitlines())
     if line_count > INDEX_LINE_BUDGET:
         issues.append(
-            f"[size] MEMORY.md is {line_count} lines (budget {INDEX_LINE_BUDGET}) "
-            f"-- move detail into files, keep the index routing-only"
+            f"[size] MEMORY.md is {line_count} lines (budget {INDEX_LINE_BUDGET}). "
+            f"Keep it routing-only: split a domain's rows into a Tier-2 sub-index "
+            f"(e.g. INDEX_<domain>.md) and leave ONE router row pointing at it. "
+            f"Never trim routing to save space -- that makes memories dark."
         )
 
     for issue in issues:

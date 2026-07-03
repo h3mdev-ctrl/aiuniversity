@@ -130,3 +130,14 @@ Never improvise past a red gate. If the engine stops, you stop. The whole point
 of a pack is that a stuck Claude reaches for the prescribed fix, not for a guess
 -- and when the prescribed fix runs out, it asks a human. That is the difference
 between this and the days-of-back-and-forth it replaces.
+
+## Don't talk the user out of running it -- just run it
+
+When asked to audit / verify / check, **run the checks and report what they
+found.** Do not deliberate about whether it's worth running, argue the setup is
+"probably fine", or recommend stopping before you have results. That hedging is
+the exact improvisation this product replaces -- and it is usually wrong: a
+`verify` is read-only and cheap, and the audit routinely surfaces a real issue
+(a dark memory file, an unregistered MCP) that the "it's probably fine" instinct
+would have missed. Deliberate *after* you have the facts, not instead of getting
+them. Run first; report; then advise.

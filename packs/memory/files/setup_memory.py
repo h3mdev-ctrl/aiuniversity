@@ -73,23 +73,51 @@ def claude_md() -> pathlib.Path:
 
 MEMORY_MD = """# Memory -- your Claude's compounding notes
 
-> **Always-loaded index.** Keep it short (routing only, no prose). Each row points
-> an INTENT ("when you're about to...") at the memory file that helps.
->
-> **Naming:** `feedback_<topic>` (how to behave) - `reference_<topic>` (where the
-> answer lives) - `project_<topic>` (durable project state) - `user_<topic>`
-> (facts about you). Every memory file carries frontmatter: `name`, `description`
-> (a triggering moment), `type`. See `_template_memory.md`.
->
-> **Reflex rule:** when a task fails twice and you find the fix, write the memory
-> *now* -- not at the end of the session. A memory nothing can reach is dead
-> weight, so always add a RESOLVER row so it's findable.
+> **Always-loaded index. Routing only, no prose -- keep it SMALL.** Every line
+> here is loaded into every session, so it is a tax on every conversation. The
+> index is a *map*, not the content.
 
 ## RESOLVER -- intent -> memory
 
+Phrase each row as the MOMENT a memory becomes useful ("when you're about to..."),
+not as a topic. That way the right note surfaces when the situation actually
+arises. Good rows look like:
+
 | When you're about to... | Consult |
 |---|---|
-| check whether this memory system is actually being recalled | [reference_canary](reference_canary.md) |
+| set up a tool on Windows and hit a path or quoting quirk | [reference_windows_setup](reference_windows_setup.md) |
+| estimate how long a task will take for this user | [feedback_no_timeline_inflation](feedback_no_timeline_inflation.md) |
+| touch the deploy pipeline | [project_deploy_setup](project_deploy_setup.md) |
+| check whether memory is actually being recalled | [reference_canary](reference_canary.md) |
+
+_(The first three are examples showing the shape -- replace them with your own.
+The canary row is real.)_
+
+## Keeping this file small (the #1 rule)
+
+The index must stay routing-only. When it grows past ~150 lines:
+
+1. **Never trim routing to save space** -- deleting a row makes that memory
+   *dark* (unreachable), which is worse than a long index.
+2. **Split a domain out into a Tier-2 sub-index.** Move a cluster of related
+   rows into e.g. `INDEX_windows.md`, and leave ONE router row here pointing at
+   it -- so the detail loads on demand and this file stays a thin map:
+
+   | When the task touches... | Open (Tier-2, on demand) |
+   |---|---|
+   | any Windows path / shell / encoding quirk | [INDEX_windows.md](INDEX_windows.md) |
+
+3. A full alphabetical file list can live in `CATALOG.md` (also opened on
+   demand), so this index never has to list every file.
+
+**Naming:** `feedback_<topic>` (how to behave) - `reference_<topic>` (where the
+answer lives) - `project_<topic>` (durable state) - `user_<topic>` (facts about
+you). Every file carries frontmatter: `name`, `description` (a triggering
+moment), `type`. See `_template_memory.md`.
+
+**Reflex rule:** when a task fails twice and you find the fix, write the memory
+*now*. Always add a RESOLVER row so it's findable -- a memory nothing routes to
+is dead weight.
 
 ## Files
 
