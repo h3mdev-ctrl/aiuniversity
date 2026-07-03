@@ -124,6 +124,15 @@ design, so make it kind.
 
 ---
 
+## Interview steps (e.g. the identity pack)
+
+Some steps need answers only the user has (their name, how they want you to talk
+to them). The script offers an `--interactive` mode that prompts on stdin -- but
+*you* can't answer those prompts. So in teach mode, **conduct the interview
+yourself**: ask the user the questions in chat, one natural exchange, then pipe
+their answers as JSON to the `--write` mode. Don't run `--interactive` and don't
+invent answers. The user's words are the input; you're just the scribe.
+
 ## The one hard rule
 
 Never improvise past a red gate. If the engine stops, you stop. The whole point

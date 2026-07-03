@@ -148,7 +148,8 @@ gbrain) in as modules:
 4. **Durability** — is your `~/.claude/projects` folder there? (where per-project
    memory compounds)
 
-Identity and guardrails are the next authoring pass — the format is ready.
+Identity (layer 0) is now built too — an interview pack that writes your context
+files and files a user_profile into memory. Guardrails is the remaining layer.
 
 ### How it runs — a pack that contains packs
 
@@ -233,7 +234,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 68 tests, all green
+python -m pytest tests/ -q      # 89 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -339,9 +340,11 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 68 tests green.
+teach/verify/remediate skill — 89 tests green.
 
 Packs:
+- **identity** — an interview (layer 0): who you are + how Claude should talk to
+  you; writes context files + a user_profile memory.
 - **memory** — set up a compounding memory + resolver index from scratch.
 - **gbrain-windows** — verify a tool is installed *and live*; choose **local**
   (PGLite) or **supabase** (hosted).

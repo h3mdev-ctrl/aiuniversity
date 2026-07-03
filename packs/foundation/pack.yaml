@@ -18,6 +18,14 @@ steps:
       memory module end to end -- set it up, audit it, and check it's live.
     module: memory
 
+  - id: layer-0-identity
+    instruction: >
+      Who you are + how Claude should talk to you (layer 0). Runs the identity
+      interview, writes your context files, and files a user_profile into memory.
+      Sequenced AFTER memory on purpose -- it files a profile INTO the memory the
+      previous step created.
+    module: identity
+
   - id: layer-2-constitution
     instruction: >
       Your constitution: a global CLAUDE.md that tells Claude your hard rules and

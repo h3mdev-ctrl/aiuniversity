@@ -51,12 +51,38 @@ def ctx_dir() -> pathlib.Path:
     return base_dir() / "context"
 
 
-def mem_dir() -> pathlib.Path:
-    return base_dir() / "memory"
-
-
 def claude_md() -> pathlib.Path:
     return base_dir() / "CLAUDE.md"
+
+
+# Memory discovery -- mirrors the memory pack, so identity links into the REAL
+# memory (global OR project-scoped) and refuses to guess when several exist.
+def _candidate_mem_dirs() -> "list[pathlib.Path]":
+    env = os.environ.get("CLAUDE_MEMORY_HOME")
+    if env:
+        return [pathlib.Path(env)]
+    dirs = [base_dir() / "memory"]
+    proj = base_dir() / "projects"
+    if proj.exists():
+        dirs += sorted(proj.glob("*/memory"))
+    return dirs
+
+
+def discover_memories() -> "list[pathlib.Path]":
+    found: list[pathlib.Path] = []
+    seen: set = set()
+    for d in _candidate_mem_dirs():
+        key = str(d).lower()
+        if (d / "MEMORY.md").exists() and key not in seen:
+            seen.add(key)
+            found.append(d)
+    return found
+
+
+def resolve_memory() -> "pathlib.Path | None":
+    """The single unambiguous memory dir, or None (0 found or >1 ambiguous)."""
+    found = discover_memories()
+    return found[0] if len(found) == 1 else None
 
 
 ME_MD = """# Me -- {name}
@@ -179,12 +205,19 @@ def check() -> int:
 
 
 def link_memory() -> int:
-    mem = mem_dir()
-    index = mem / "MEMORY.md"
-    if not index.exists():
+    found = discover_memories()
+    if len(found) > 1:
+        print(f"AMBIGUOUS: {len(found)} memory systems found -- not guessing which:")
+        for d in found:
+            print(f"  - {d}")
+        print("Pin the right one with CLAUDE_MEMORY_HOME, then re-run.")
+        return 3
+    if not found:
         print("no memory system found -- run the memory pack first (packs/memory)")
         return 1
+    mem = found[0]
     (mem / "user_profile.md").write_text(USER_PROFILE_MD, encoding="utf-8")
+    index = mem / "MEMORY.md"
     text = index.read_text(encoding="utf-8")
     if "user_profile" not in text:
         index.write_text(text.rstrip() + "\n" + MEMORY_IDENTITY_BLOCK, encoding="utf-8")
@@ -193,11 +226,13 @@ def link_memory() -> int:
 
 
 def check_memory() -> int:
-    index = mem_dir() / "MEMORY.md"
+    mem = resolve_memory()
+    if mem is None:
+        return 1
+    index = mem / "MEMORY.md"
     ok = (
-        index.exists()
-        and "user_profile" in index.read_text(encoding="utf-8")
-        and (mem_dir() / "user_profile.md").exists()
+        "user_profile" in index.read_text(encoding="utf-8")
+        and (mem / "user_profile.md").exists()
     )
     return 0 if ok else 1
 
