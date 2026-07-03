@@ -166,6 +166,43 @@ python -m pytest tests/ -q      # 41 tests, all green
 
 ---
 
+## What it costs
+
+Setup is a one-time, guided run. Re-checking it later is basically free, and it
+costs nothing when you're not running it.
+
+| | Time | Tokens | Rough $ (pay-as-you-go API) |
+|---|---|---|---|
+| **Set up foundation + gbrain** (one guided `teach` run) | ~15–45 min\* | ~40k–100k | ~$0.50–$3 |
+| **Re-check later** (`verify`) | seconds | ~2–6k | a few cents |
+| **Idle** (not running) | — | 0 | $0 |
+
+\* Most of that time is *you* doing the real steps — creating a Supabase project,
+setting your PATH. The pack removes the guessing, not the typing. The same setup
+unguided took a friend **days**.
+
+Two things keep it cheap:
+
+- **The checks cost ~zero tokens.** They're local shell commands (`gbrain
+  --version`, `claude mcp list`) that run on your machine — not agent reasoning.
+  Tokens are spent only on the teaching narration and reading results back. A
+  `verify` is a single command round-trip (~3KB of output).
+- **There's no background cost.** The pack does nothing unless you run it — no
+  daemon, no polling, no idle spend.
+
+What it replaces is the expensive part: an unguided Claude re-deriving a fiddly
+setup from scratch wanders across multiple sessions and can burn **hundreds of
+thousands of tokens** — and still leave you "not even activated." The pack turns
+that open-ended grind into a bounded run.
+
+Numbers vary with your model tier (Haiku < Sonnet < Opus), how many steps need a
+fix, and how chatty the checks are. On a Claude Pro/Max subscription there's no
+per-run charge — it's a rounding error against your monthly quota. And gbrain's
+own running costs (its database, embeddings) are separate — the pack just gets it
+live.
+
+---
+
 ## What's in here
 
 ```
