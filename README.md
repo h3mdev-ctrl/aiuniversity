@@ -135,54 +135,65 @@ The full vision is **six layers**, each with a concrete check:
 ### What it checks today
 
 Honest picture: the v1 foundation is a **working slice**, not all six layers at
-full depth yet. It runs three real checkpoints — and pulls the whole gbrain pack
-in as one of them:
+full depth. It runs four real checkpoints — and pulls two whole packs (memory,
+gbrain) in as modules:
 
-1. **Constitution** — is your global `CLAUDE.md` there? (the file that stops
+1. **Memory that compounds** — *run the memory pack right here* (a **module**).
+   Unlike the others, it doesn't just verify — it **sets up** the structure from
+   scratch: a `memory/` folder, an always-loaded resolver index, wired to load
+   every session, then a recall check that proves it's actually working.
+2. **Constitution** — is your global `CLAUDE.md` there? (the file that stops
    Claude improvising against your setup)
-2. **Capabilities** — *run the gbrain pack right here* (a **module** step).
-3. **Durability** — is your `~/.claude/projects` folder there? (where per-project
+3. **Capabilities** — *run the gbrain pack right here* (a **module**).
+4. **Durability** — is your `~/.claude/projects` folder there? (where per-project
    memory compounds)
 
-Identity, memory, and guardrails are the next authoring pass — the format is
-ready for them; they just need writing.
+Identity and guardrails are the next authoring pass — the format is ready.
 
-### How it runs — a pack that contains a pack
+### How it runs — a pack that contains packs
 
-Step 2 isn't a check, it's a pointer to another pack:
+A step like this isn't a check, it's a pointer to another pack:
 
 ```yaml
-  - id: layer-4-capabilities
-    instruction: set up your tools — install, connect, prove gbrain is live
-    module: gbrain-windows      # run this whole pack right here
+  - id: layer-1-memory
+    instruction: set up a compounding memory with an always-loaded resolver index
+    module: memory              # run this whole pack right here
 ```
 
-When the engine hits that line it **opens the gbrain pack and runs its steps
-inline**, then comes back and continues. So one run of the foundation walks this
-whole sequence (real output from the golden-path run):
+When the engine hits that line it **opens that pack and runs its steps inline**,
+then comes back and continues. So one run of the foundation walks this whole
+sequence (the gbrain half is real output from the golden-path run; memory's last
+step is the one live behavioural check):
 
 ```
-run: verify packs/foundation
+run: remediate packs/foundation
 │
-├─ 1. layer-2-constitution        is ~/.claude/CLAUDE.md there?     ✓
+├─ layer-1-memory        "run the memory pack here"
+│     └─ opens memory, runs its steps inline:
+│          memory/structure               set up memory/ + resolver index
+│          memory/index-healthy           doctor: VERDICT HEALTHY
+│          memory/wired-to-constitution   pointed at from CLAUDE.md (loads it)
+│          memory/recall-probe            fresh session surfaces the canary  ← live
 │
-├─ 2. layer-4-capabilities   "run the gbrain pack here"
-│        └─ opens gbrain-windows, runs its 4 steps inline:
-│             gbrain-windows/install          gbrain --version      ✓
-│             gbrain-windows/brain-reachable  gbrain list -n 1      ✓
-│             gbrain-windows/mcp-registered   claude mcp list       ✓
-│             gbrain-windows/activation-exam  gbrain query "…"      ✓
+├─ layer-2-constitution  is ~/.claude/CLAUDE.md there?
 │
-└─ 3. layer-5-durability          is ~/.claude/projects there?     ✓
-        ▼
-      PASS  (all 6 checkpoints green)
+├─ layer-4-capabilities  "run the gbrain pack here"
+│     └─ opens gbrain-windows, runs its 4 steps inline:
+│          gbrain-windows/install          gbrain --version           ✓
+│          gbrain-windows/brain-reachable  gbrain list -n 1           ✓
+│          gbrain-windows/mcp-registered   claude mcp list            ✓
+│          gbrain-windows/activation-exam  gbrain query "…"           ✓
+│
+└─ layer-5-durability    is ~/.claude/projects there?
+       ▼
+     PASS
 ```
 
-The gbrain steps come back labelled `gbrain-windows/…`, so if anything breaks you
-know **both which pack and which step** — the foundation doesn't just say
-"capabilities failed," it says `gbrain-windows/mcp-registered failed, here's the
-fix.` And it would *stop right there* — the durability check after it never runs
-— because there's no point checking later things past a broken foundation piece.
+The steps come back labelled `memory/…` and `gbrain-windows/…`, so if anything
+breaks you know **both which pack and which step** — the foundation doesn't just
+say "capabilities failed," it says `gbrain-windows/mcp-registered failed, here's
+the fix.` And it *stops right there* — later checks never run — because there's no
+point checking on past a broken foundation piece.
 
 That's the one idea that makes the foundation special: **it's a pack that contains
 packs.** The umbrella declares slots; real tool-packs (gbrain today, Obsidian
@@ -222,7 +233,13 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 41 tests, all green
+python -m pytest tests/ -q      # 51 tests, all green
+```
+
+**Set up a compounding memory** (creates the structure, wires it, proves recall):
+
+```bash
+python -m runner.cli remediate packs/memory
 ```
 
 ---
@@ -274,9 +291,10 @@ aiuniversity/
     verify.py           reads a pack, runs each check, escape-hatch state machine
     cli.py              the command SKILL.md calls (JSON out)
   packs/
-    foundation/         the umbrella: 6 layers, layer 4 pulls in a module
-    gbrain-windows/     the first real pack — gbrain set up + proven live on Windows
-  tests/                41 tests
+    foundation/         the umbrella: pulls in the memory + gbrain packs as modules
+    memory/             sets up a compounding memory + always-loaded resolver index
+    gbrain-windows/     gbrain set up + proven live on Windows
+  tests/                51 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -284,7 +302,8 @@ aiuniversity/
 `pack.yaml` is inert, human-readable data (you can read it before you run it —
 that's the safety check). `verify.py` is the *only* thing that decides PASS/FAIL,
 so the answer is the same every time. `SKILL.md` does all the talking. Packs can
-include packs (`modules:`), so the foundation composes the gbrain pack inline.
+include packs (`modules:`), so the foundation composes the memory and gbrain packs
+inline.
 
 The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & why)
 → [ceo-plan](docs/ceo-plan.md) (scope) → [eng-plan](docs/eng-plan.md) (architecture
@@ -294,16 +313,22 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 ## Status & roadmap
 
-**v1 engine + first pack: complete.** Matcher, runner, escape hatch, validation,
-`modules:` composition, CLI, and the teach/verify/remediate skill — 41 tests
-green, and the foundation+gbrain golden path passes on a real machine.
+**v1 engine + three packs: complete.** Matcher, runner, escape hatch, validation,
+`modules:` composition, CLI, and the teach/verify/remediate skill — 51 tests
+green. Packs: **gbrain-windows** (verify an existing tool) and **memory** (set up
+a compounding memory + resolver index from scratch), both threaded through the
+**foundation** umbrella. Setup golden paths pass on a real machine.
 
 Next, in order:
+- **The Obsidian LLM-wiki module** — an LLM-queryable knowledge base; adding it
+  should be mostly *filling in a `pack.yaml`*.
 - **Hand it to a friend.** Zero-help setup = the wedge is proven. This is the real
   test; everything so far just makes it possible.
+- **The live recall probe end-to-end** — memory's behavioural `recall-probe` step
+  spawns a real `claude -p`; wire the recipient's fresh-session check into the
+  golden path (today it's the one live step, unit-tested but run by hand).
 - **Per-OS `cmd:` variants** in `pack.yaml` (the runner uses cmd.exe on Windows;
   bash-only checks need per-OS forms).
-- **The Obsidian module** — adding it should be *filling in a `pack.yaml`*, no new code.
 - **Before any public/third-party marketplace:** pack signing + "review before you
   run" + sandboxing. A pack is executable instructions on your machine — safe among
   friends, a hard gate before strangers.

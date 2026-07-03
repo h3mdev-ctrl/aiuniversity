@@ -11,6 +11,13 @@
 name: foundation
 version: 0.1.0
 steps:
+  - id: layer-1-memory
+    instruction: >
+      Memory that compounds: a memory/ folder with an always-loaded resolver index,
+      wired into your constitution and proven to actually recall. This runs the
+      memory module end to end -- set it up, audit it, and check it's live.
+    module: memory
+
   - id: layer-2-constitution
     instruction: >
       Your constitution: a global CLAUDE.md that tells Claude your hard rules and

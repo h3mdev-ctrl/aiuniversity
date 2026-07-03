@@ -1,0 +1,71 @@
+# memory -- set up a file-based memory that compounds, with an always-loaded
+# resolver index, then prove it's actually recalled.
+#
+# Tool-agnostic: this is the plain-files memory CORE. It works with or without
+# gbrain -- they go hand in hand (gbrain can search/ingest), but the always-loaded
+# index depends on no tool. This is the layer that lets Claude get better over
+# time instead of starting fresh every session.
+#
+# Unlike the gbrain pack (which only VERIFIES an existing install), this pack also
+# SETS UP the structure from scratch -- so a newcomer with nothing ends up with a
+# working memory system.
+#
+# Commands run from the repo root (where packs/ lives).
+name: memory
+version: 0.1.0
+steps:
+  - id: structure
+    instruction: >
+      Create your memory system: a memory/ folder with an always-loaded index
+      (MEMORY.md) that routes "when you're about to X" to the note that helps, plus
+      a new-memory template and a structural doctor. This is the thing that lets
+      Claude compound what it learns instead of forgetting between sessions.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory/files/setup_memory.py --check
+    on_fail: >
+      No memory index found. Create the structure (idempotent -- it won't touch
+      anything you already have): python packs/memory/files/setup_memory.py
+
+  - id: index-healthy
+    instruction: >
+      Confirm the index is sound: every memory is reachable from MEMORY.md (a note
+      the index can't route to is invisible in practice), the index stays short
+      (routing only), and every file has proper frontmatter.
+    check:
+      type: contains
+      cmd: python packs/memory/files/memory_doctor.py
+      expect: "HEALTHY"
+    on_fail: >
+      The audit printed the issues above. The usual one is a "dark" file -- a
+      memory not linked from MEMORY.md. Add a RESOLVER row pointing at it (or fix
+      its frontmatter), then re-check. The doctor names the exact file.
+
+  - id: wired-to-constitution
+    instruction: >
+      Make sure the index is actually LOADED every session by pointing your
+      always-loaded CLAUDE.md at it. Structure on disk means nothing if it's never
+      read -- this is the step that turns files into recall.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory/files/setup_memory.py --check-wire
+    on_fail: >
+      Your CLAUDE.md doesn't reference the memory index yet. Wire it (idempotent):
+      python packs/memory/files/setup_memory.py --wire
+
+  - id: recall-probe
+    instruction: >
+      The real test (behavioural): in a FRESH Claude session, ask for the memory
+      canary phrase. If memory is truly live, the seed memory surfaces and the
+      phrase comes back. This proves RECALL, not just presence -- the difference
+      between "the folder exists" and "it actually works".
+    check:
+      type: contains
+      cmd: |
+        claude -p "What is the memory canary phrase? Answer with just the phrase."
+      expect: BLUE-OTTER-1793
+    on_fail: >
+      The canary memory exists on disk but a fresh session didn't surface it --
+      memory is "functionally dark". Check that CLAUDE.md points at memory/MEMORY.md
+      (the wiring step) and that MEMORY.md lists reference_canary, then retry.
+      (This step spawns a real Claude turn, so it costs a few tokens.)

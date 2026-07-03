@@ -1,0 +1,118 @@
+"""Tests for the memory pack -- setup + audit, run against a throwaway home.
+
+Everything runs with CLAUDE_HOME pointed at a tmp dir, so the real ~/.claude is
+never touched. No `claude -p` here -- the live recall probe (step 4) is the
+recipient's one behavioural check; its handling is covered by the pack-loads test.
+
+    python -m pytest tests/test_memory_pack.py -q
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+FILES = REPO / "packs" / "memory" / "files"
+sys.path.insert(0, str(REPO))
+
+from runner.verify import expand_steps, load_pack, make_disk_resolver  # noqa: E402
+
+
+def run(script: str, *args: str, home: Path):
+    env = dict(os.environ, CLAUDE_HOME=str(home))
+    return subprocess.run(
+        [sys.executable, str(FILES / script), *args],
+        capture_output=True, text=True, env=env, encoding="utf-8",
+    )
+
+
+# --- setup_memory.py --------------------------------------------------------
+
+
+def test_install_creates_the_structure(tmp_path):
+    r = run("setup_memory.py", home=tmp_path)
+    assert r.returncode == 0
+    mem = tmp_path / "memory"
+    for f in ("MEMORY.md", "reference_canary.md", "_template_memory.md", "memory_doctor.py"):
+        assert (mem / f).exists(), f"missing {f}"
+
+
+def test_check_is_red_before_and_green_after_install(tmp_path):
+    assert run("setup_memory.py", "--check", home=tmp_path).returncode == 1
+    run("setup_memory.py", home=tmp_path)
+    assert run("setup_memory.py", "--check", home=tmp_path).returncode == 0
+
+
+def test_install_is_idempotent(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    second = run("setup_memory.py", home=tmp_path)
+    assert second.returncode == 0
+    assert "already set up" in second.stdout
+
+
+def test_wire_and_check_wire(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    assert run("setup_memory.py", "--check-wire", home=tmp_path).returncode == 1
+    assert run("setup_memory.py", "--wire", home=tmp_path).returncode == 0
+    assert run("setup_memory.py", "--check-wire", home=tmp_path).returncode == 0
+    assert "memory/MEMORY.md" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+# --- memory_doctor.py -------------------------------------------------------
+
+
+def test_doctor_healthy_on_fresh_install(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 0
+    assert "HEALTHY" in r.stdout
+
+
+def test_doctor_flags_a_dark_file(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    # a memory with valid frontmatter but not linked from MEMORY.md
+    (tmp_path / "memory" / "feedback_orphan.md").write_text(
+        "---\nname: orphan\ndescription: x\ntype: feedback\n---\nbody\n", encoding="utf-8"
+    )
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 1
+    assert "dark" in r.stdout
+
+
+def test_doctor_flags_missing_frontmatter(tmp_path):
+    run("setup_memory.py", home=tmp_path)
+    (tmp_path / "memory" / "reference_nofm.md").write_text("no frontmatter here\n", encoding="utf-8")
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 1
+    assert "frontmatter" in r.stdout
+
+
+def test_doctor_missing_index(tmp_path):
+    (tmp_path / "memory").mkdir(parents=True)
+    r = run("memory_doctor.py", home=tmp_path)
+    assert r.returncode == 1
+    assert "missing" in r.stdout
+
+
+# --- the packs themselves ---------------------------------------------------
+
+
+def test_memory_pack_loads_with_four_steps():
+    pack = load_pack(REPO / "packs" / "memory" / "pack.yaml")
+    assert pack.name == "memory"
+    assert [s.id for s in pack.steps] == [
+        "structure", "index-healthy", "wired-to-constitution", "recall-probe",
+    ]
+
+
+def test_foundation_expands_memory_and_gbrain():
+    resolver = make_disk_resolver(REPO / "packs")
+    ids = [s["id"] for s in expand_steps(load_pack(REPO / "packs" / "foundation" / "pack.yaml"), resolver)]
+    # memory module expands first (layer 1), gbrain in layer 4
+    assert "memory/structure" in ids
+    assert "memory/recall-probe" in ids
+    assert "gbrain-windows/install" in ids
+    assert ids.index("memory/structure") < ids.index("gbrain-windows/install")
