@@ -44,6 +44,31 @@ def test_install_then_check_green(tmp_path):
     assert "ideas/" in text and "people/" in text   # slug conventions
 
 
+def test_default_cadence_is_lean(tmp_path):
+    # the default must be cost-conscious: lean, NOT every-message capture
+    run("setup_gbrain_usage.py", "--install", home=tmp_path)
+    text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "cadence: lean" in text and "cadence: eager" not in text
+    assert "not on every turn" in text.lower()          # the cost-conscious promise
+    assert "clearly worth keeping" in text.lower()      # judgment-based capture, not every-turn
+
+
+def test_eager_cadence_opt_in(tmp_path):
+    run("setup_gbrain_usage.py", "--install", "--eager", home=tmp_path)
+    text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "cadence: eager" in text
+    assert "every message" in text.lower()   # eager IS the aggressive one
+    assert run("setup_gbrain_usage.py", "--check", home=tmp_path).returncode == 0
+
+
+def test_cadence_flips_in_place(tmp_path):
+    run("setup_gbrain_usage.py", "--install", "--eager", home=tmp_path)
+    run("setup_gbrain_usage.py", "--install", home=tmp_path)  # back to lean
+    text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "cadence: lean" in text and "cadence: eager" not in text
+    assert text.count("<!-- gbrain-usage-discipline:start -->") == 1  # no duplication
+
+
 def test_install_is_idempotent(tmp_path):
     run("setup_gbrain_usage.py", "--install", home=tmp_path)
     run("setup_gbrain_usage.py", "--install", home=tmp_path)

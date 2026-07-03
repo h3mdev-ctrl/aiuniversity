@@ -359,8 +359,10 @@ Packs:
   forbidden probe through the installed hook.
 - **gbrain-windows** — verify a tool is installed *and live*; choose **local**
   (PGLite) or **supabase** (hosted). Also wires a **usage discipline** into CLAUDE.md
-  (capture ideas/entities as they come up, search the brain before researching,
-  backlink) so Claude *uses* the brain habitually instead of only when asked.
+  so Claude *uses* the brain instead of only when asked — **lean by default**
+  (search-first before researching, capture only what's clearly worth keeping, no
+  per-turn token tax), with an opt-in **`--eager`** cadence for power users who want
+  every-message capture.
 - **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)
   or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
 - **autolearn** — a phantom-style wrap-up: a git post-commit hook captures every

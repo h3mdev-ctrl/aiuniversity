@@ -103,17 +103,19 @@ steps:
 
   - id: usage-discipline
     instruction: >
-      Make gbrain HABITUAL, not just installed. Writes a usage-discipline block into
-      your constitution (CLAUDE.md) so Claude USES gbrain automatically -- captures
-      ideas/entities as they come up, searches the brain before researching, and
-      backlinks. Getting gbrain live is necessary but not sufficient: a brain nobody
-      is told to use stays empty. (Complements gstack's "GBrain Search Guidance" block,
-      which only covers the search-vs-grep preference -- this adds the capture +
-      research-first half.)
+      Make gbrain HABITUAL, not just installed -- a brain nobody is told to use stays
+      empty. Writes a usage-discipline block into your constitution (CLAUDE.md).
+      Defaults to the LEAN cadence: search the brain before researching, and capture
+      only what's clearly worth keeping -- NOT on every message, so there's no
+      per-turn token tax. (Registering gbrain as an MCP already makes its tools
+      available; this governs how aggressively Claude ACTS on that.) Power users who
+      want maximal capture on every message can re-run with --eager. Complements
+      gstack's "GBrain Search Guidance" block (search-vs-grep only).
     check:
       type: command_succeeds
       cmd: python packs/gbrain-windows/files/setup_gbrain_usage.py --check
     on_fail: >
       The gbrain usage discipline isn't in your CLAUDE.md yet, so Claude will only
-      use gbrain when explicitly asked. Install it (idempotent):
+      use gbrain when explicitly asked. Install the lean default (idempotent):
       python packs/gbrain-windows/files/setup_gbrain_usage.py --install
+      (add --eager for every-message capture if you want maximal compounding + cost.)
