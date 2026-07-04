@@ -412,5 +412,22 @@ Next, in order:
 
 ---
 
+## Attribution + related projects
+
+- **[gbrain](https://github.com/garrytan/gbrain)** (Garry Tan, MIT) — a personal
+  knowledge brain with its own excellent **skillpack system**. aiuniversity does
+  not adopt gbrain's distribution channel (`skillpack.json` + `gbrain skillpack
+  scaffold`), but adopts its **structural conventions** — the per-skill
+  Contract / Iron Laws / Anti-Patterns / Related pattern, the file-by-subject-not-
+  format ingest rule, verbatim-quote discipline, and retrieval-reflex depth.
+  See [`docs/pack-structure.md`](docs/pack-structure.md) for the section
+  conventions each aiuniversity pack follows.
+- **Quality checking a gbrain-format skillpack?** Use the official doctor —
+  `gbrain skillpack doctor <dir>`. aiuniversity does not ship its own; each pack's
+  correctness is covered by its own test suite (`python -m pytest`), and the
+  human-legible per-pack `README.md` covers what the tests can't.
+
+---
+
 *Windows-first, friends-first. A side project about making Claude genuinely useful
 the first time — and keeping it that way.*

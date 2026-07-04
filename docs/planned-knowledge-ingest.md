@@ -109,13 +109,14 @@ thin layers over primitives the packs already ship.
 
 ---
 
-## Patterns to inherit (from gbrain's mature ingest skills)
+## Patterns adopted from gbrain's ingest skills (attributed)
 
-gbrain ships a set of production ingest skills (`ingest`, `media-ingest`,
-`article-enrichment`, `voice-note-ingest`) covering the exact ground both modules do.
-aiuniversity is **not** adopting gbrain's distribution channel (skillpack + scaffold);
-we're stealing the **content patterns** that make those skills work in production.
-Both planned modules must bake these in from day one — free quality lift.
+gbrain ([github.com/garrytan/gbrain](https://github.com/garrytan/gbrain), MIT) ships
+a set of production ingest skills (`ingest`, `media-ingest`, `article-enrichment`,
+`voice-note-ingest`) covering the exact ground both modules do. aiuniversity does
+**not** adopt gbrain's distribution channel (skillpack + scaffold) — those stay
+separate — but adopts the **content patterns** that make those skills work in
+production, with attribution. Both planned modules bake these in from day one.
 
 ### Iron Laws (non-negotiables — every module gets a "Contract" section listing these)
 
@@ -136,7 +137,7 @@ Both planned modules must bake these in from day one — free quality lift.
    wall of text with no attribution. Diarised (word-level speaker labels, e.g.
    Diarize.io / pyannote) is the bar; quotes need real names, not `speaker_0`.
 
-### The canonical structured page format (steal wholesale for both modules)
+### The canonical structured page format (adopted for both modules)
 
 Every enriched ingest page ends up in this shape — atomic notes, weekly wrap-ups,
 and monthly syntheses all inherit it:
