@@ -35,10 +35,32 @@ START = "<!-- gbrain-usage-discipline:start -->"
 END = "<!-- gbrain-usage-discipline:end -->"
 
 _SHARED_TAIL = """**Research the brain first** (cheap, high-value -- keep this either way):
-- Before researching a person, company, or topic, `search` + `query` the brain.
-  Fill gaps with external sources only if it comes up empty.
-- For "what do we know about X", use `query` (hybrid) over `search` (keyword only);
-  `get_page` the full page when you know the slug.
+
+- Before researching any person, company, or topic in this turn, `search` + `query`
+  the brain. Fill gaps with external sources only if it comes up empty.
+
+*When to open a specific page* -- retrieve when ANY of these fires AND it isn't
+already loaded in context (retrieve **on demand**, when an entity is salient --
+don't bulk-load the address book):
+- An entity (person / company / project) is the **subject** of the message, or you
+  are about to make a decision or judgment about it.
+- A **brain-page pointer appeared in this turn** (a slug + summary you were handed)
+  -- open it before relying on the details.
+- A name appears that you **don't recognize** and looks notable -- do a quick resolve.
+- You are about to **assert a non-trivial detail** about an entity -- say "let me
+  check", not a guess.
+- You have discussed a named person for **more than a message** without opening
+  their page -- open it now.
+
+*Escalate only as far as the task needs:*
+1. Pointer / metadata (already in context) -- stop here if identity is all you need.
+2. Full page: `get_page <slug>` (or `query` if the slug is unknown) -- when the
+   details matter.
+3. Linked neighbours: `graph` / `backlinks` -- only when relationship context matters.
+
+For "what do we know about X" specifically, use `query` (hybrid) over `search`
+(keyword only); `get_page` when you know the slug. Resolve only the name(s) the
+task needs, use them, drop them.
 
 **When you write to the brain:**
 - Attribute sources inline: `[Source: <who>, <YYYY-MM-DD>]`.

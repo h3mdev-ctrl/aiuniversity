@@ -109,6 +109,90 @@ thin layers over primitives the packs already ship.
 
 ---
 
+## Patterns to inherit (from gbrain's mature ingest skills)
+
+gbrain ships a set of production ingest skills (`ingest`, `media-ingest`,
+`article-enrichment`, `voice-note-ingest`) covering the exact ground both modules do.
+aiuniversity is **not** adopting gbrain's distribution channel (skillpack + scaffold);
+we're stealing the **content patterns** that make those skills work in production.
+Both planned modules must bake these in from day one — free quality lift.
+
+### Iron Laws (non-negotiables — every module gets a "Contract" section listing these)
+
+1. **File by primary subject, not by format.** A video *about a person* files to
+   `people/<name>` (+ back-links); it does NOT live in `media/videos/` just because
+   it's a video. Filing by format is the classic anti-pattern that turns a brain into
+   a chronological dump.
+2. **Entity back-links — a media item is NOT fully ingested until entity
+   propagation is complete.** Every person / company mentioned gets a back-link
+   *from their page to this one*. An unlinked mention is a broken brain.
+3. **Verbatim quotes only.** Paraphrasing a quote demotes it to prose — "the author
+   argues that…" is not a quote. Quotes go in a **`## Quotable Lines`** section, exact
+   wording, ≥3 per article.
+4. **Preserve the raw source.** For every ingest, the original (transcript, thread,
+   PDF, screenshot) lives on disk *and* is linked from the page in a collapsed
+   `<details>` block. A page without provenance is unverifiable.
+5. **Speaker-diarised transcripts** for video / podcast — plain whisper gives you a
+   wall of text with no attribution. Diarised (word-level speaker labels, e.g.
+   Diarize.io / pyannote) is the bar; quotes need real names, not `speaker_0`.
+
+### The canonical structured page format (steal wholesale for both modules)
+
+Every enriched ingest page ends up in this shape — atomic notes, weekly wrap-ups,
+and monthly syntheses all inherit it:
+
+```markdown
+# {Title — a compelling headline, NOT "This video discusses…"}
+
+## Executive Summary        # 2-3 sentences, the ONE thing worth remembering
+## Why It Matters           # tied to specific brain context (query'd, not generic)
+## Quotable Lines           # ≥3 VERBATIM, with speaker attribution when applicable
+## Key Insights             # ≥3 real insights (not topic labels)
+## Surprising / Counterintuitive
+## See Also                 # standard markdown links, not [[wiki-links]]
+
+<details><summary>Raw source</summary>
+{original transcript / thread / article text — never lost}
+</details>
+```
+
+### Discipline patterns (module checkpoints must test these)
+
+- **Idempotency via a frontmatter flag** — a `needs_enrichment: true` (or
+  `needs_rollup: true`) flag on the raw page. Enrichment / rollup clears it. Re-running
+  the module skips already-enriched pages instead of clobbering them. Cheap correctness.
+- **Test-3-before-bulk.** When processing a batch (a channel's new uploads, a week's
+  threads), do 3–5 first, *read the output*, fix the approach, then run the rest. The
+  cost of testing 3 is near-zero; the cost of cleaning up 100 bad pages is enormous.
+  Explicit anti-pattern to name in every ingest module's docs.
+- **Two-pass model routing.** Draft on **Haiku / Sonnet** (cheap); spot-check 5 with a
+  quality bar (verbatim-quote fidelity, entity coverage, "Why It Matters" specificity).
+  If quotes paraphrase or entities miss, promote *the failing batch* to **Opus** and
+  re-run — don't blanket-upgrade the model.
+- **Anti-Patterns section, explicit and named.** Every module SKILL.md ships an
+  `## Anti-Patterns` list — the specific failure modes users hit — with a leading ❌
+  and one line of what to do instead. Teaching by naming the ways it goes wrong.
+
+### Where these land in the module checkpoints
+
+Fold into the checkpoints already sketched above:
+
+- `x-post-ingest / distills-not-dumps` — the check *becomes* "output contains
+  Executive Summary + Quotable Lines (verbatim) + Why It Matters + entity back-links"
+  (not just "not a raw paste").
+- `x-post-ingest / files-into-memory` — check adds "filed under the primary subject's
+  path, not `media/x/`" and "`<details>` block preserves raw thread".
+- `youtube-transcriber / distills-into-memory` — check adds "diarised transcript
+  present + linked + speakers have real names" and "entity back-links propagated".
+- All ingest checkpoints inherit an **idempotency probe** (re-run on an already-processed
+  page is a no-op).
+
+Nothing about this depends on gbrain's tools specifically — it's the *shape* of a
+useful ingest page. If we ever ship a variant that files into an obsidian-wiki + memory
+combo instead of gbrain, the same contract applies.
+
+---
+
 ## Open questions to resolve when we build these
 
 - **Source adapters are the fragile part** — auth/cookies/rate limits. Each needs its
