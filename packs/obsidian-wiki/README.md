@@ -46,6 +46,29 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
 - ❌ **Using `[[wiki-links]]`** in notes you intend to publish — they break on
   GitHub-rendered output.
 
+## Token cost (caveat — read before bulk ingest)
+
+Setting up the vault is cheap. **Filling it is not.** A wiki ingest isn't one
+write — it's one main page **plus N entity updates**, and the cross-referencing
+pass is roughly **O(entities)**: each notable entity means *read its existing page
++ write a back-link + a timeline entry*. Ballpark:
+
+- **One modest ingest** (~6 entities): **~20–30k tokens.**
+- **One dense longread / 30-min video** (~15 entities, timeline-merge onto every
+  page): **~50k+.**
+- **A week's batch of ~10 items:** **~250–500k tokens.** The entity/cross-ref pass
+  is typically ~half of that — it's the part that "uses up a lot".
+
+**Keep it affordable:**
+- **Delegate the bulk page-writing to Sonnet/Haiku sub-agents, off the main
+  (Opus) context** — cheaper per token AND keeps your window clean. This is how a
+  production ingest is built (orchestrator synthesises hubs; workers write pages).
+- **Cap cross-links to genuinely notable entities.** The "back-link every mention"
+  Iron Law is thorough but it's the multiplier; a notability gate cuts the entity
+  count that drives cost.
+- **Test 3 items before a batch.** The marginal cost of testing 3 is near zero;
+  re-cleaning 100 bad pages (and paying for them twice) is not.
+
 ## Related packs
 
 - [`memory`](../memory/) — prerequisite for the `memory-linked` step.

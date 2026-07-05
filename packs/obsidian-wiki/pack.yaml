@@ -5,6 +5,14 @@
 # to consult it; gbrain can ingest it for semantic search. Memory + gbrain go hand
 # in hand here.
 #
+# TOKEN COST caveat: SETUP is cheap; FILLING the wiki is not. Each ingest is one
+# page + N entity updates, and cross-referencing is ~O(entities) (read + back-link
+# + timeline per entity). Budget ~20-30k tokens for a modest ingest, ~50k+ for a
+# dense one, ~250-500k for a week's batch -- the cross-ref pass is ~half of it.
+# Keep it affordable: delegate bulk writing to Sonnet/Haiku sub-agents (off the
+# main context), cap cross-links to notable entities, test 3 before a batch. See
+# README.md "Token cost".
+#
 # CHOICE -- pick how the wiki lives:
 #   --variant local    just on your machine: vault + memory link, nothing published (default)
 #   --variant hosted   also published free with Quartz -> Vercel Hobby / GitHub Pages

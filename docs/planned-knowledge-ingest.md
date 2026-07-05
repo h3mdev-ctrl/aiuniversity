@@ -173,6 +173,16 @@ and monthly syntheses all inherit it:
 - **Anti-Patterns section, explicit and named.** Every module SKILL.md ships an
   `## Anti-Patterns` list — the specific failure modes users hit — with a leading ❌
   and one line of what to do instead. Teaching by naming the ways it goes wrong.
+- **Cost-aware cross-referencing.** Ingest is expensive and the entity/cross-ref
+  pass is the multiplier — roughly O(entities), a read + back-link + timeline write
+  per notable entity. Budget ~20–30k tokens for a modest ingest, ~50k+ for a dense
+  one, ~250–500k for a week's batch (the cross-ref pass ~half). Three levers, all
+  of which each module must support: **(a)** delegate bulk page-writing to
+  Sonnet/Haiku sub-agents off the main context (orchestrator synthesises, workers
+  write); **(b)** a **notability gate** so cross-links only fire for entities worth
+  tracking — this directly caps the multiplier; **(c)** test-3-before-bulk. A module
+  that back-links every passing mention with no notability gate will surprise the
+  user with the bill.
 
 ### Where these land in the module checkpoints
 
