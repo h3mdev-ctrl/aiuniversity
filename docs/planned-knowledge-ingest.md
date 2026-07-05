@@ -184,6 +184,46 @@ and monthly syntheses all inherit it:
   that back-links every passing mention with no notability gate will surprise the
   user with the bill.
 
+### Worked example: the deterministic cross-link helper (why we chose a script over a model)
+
+Full reference implementation: [`examples/vault_crosslink.py`](examples/vault_crosslink.py).
+It's the concrete answer to "script the deterministic 80%" — and it earned its place
+by being run on a real wiki, not argued for on a whiteboard.
+
+**The decision.** Cross-referencing during an ingest *looks* like an LLM job, so the
+instinct is to route it to a cheap model (Haiku) to save tokens. But when you break
+it down, the expensive part — the **O(entities) backlink grind** (open each connected
+entity's page, append the reciprocal link) — is **pure string manipulation**. It has
+no judgment in it. So the right move isn't "use a cheaper model", it's **use no model**:
+a script does the plumbing (the links), and the model is reserved for the synthesis
+(the prose that explains *why* two entities relate). Deterministic-first: before
+reaching for Haiku/Sonnet/Opus, ask whether the task is actually string work.
+
+**Why not just use Haiku for it?** Two reasons that only became clear from the real
+data: (1) a sub-agent's spawn overhead (~8–15K tokens) exceeds the ~100-token cost of
+a single append, so delegating small mechanical ops to a model *loses*; (2) the
+mechanical output is verifiable deterministically (did the link land? is it reciprocal
+now?), so a model adds cost without adding safety. A script is both cheaper and safer.
+
+**What it does** (each mode dry-runs by default; `--apply` writes; all idempotent):
+- `--audit` — broken wikilinks + missing entity↔entity backlink reciprocity.
+- `--fix` — add the missing reciprocal backlinks (bare `- [[A]]`, asserting no
+  directional claim, since mentor/mentee-style relationships are asymmetric).
+- `--fix-bugs` — de-link namespace leaks (`[[project_x]]` → `project_x`) that render
+  broken in the published site.
+- `--broken` — triage the dangling links into **bug / should-exist / intentional**,
+  so a human knows which missing pages are worth creating (synthesis) vs. leaving.
+
+**The evidence (why it's in here at all).** Run once on a real 119-entity, 853-page,
+18,000-wikilink wiki, it found **121 missing backlinks** and added them, and surfaced
+~1,150 dangling links (incl. namespace-leak bugs the manual pass never caught). Cost:
+**0 model tokens.** The same 121 backlinks by hand would have been ~150–350k tokens of
+a top-tier model — for zero judgment. That's the whole thesis in one number.
+
+**The reusable lesson for these packs:** *installing a capability isn't using it, and
+the mechanical half of using it shouldn't spend model tokens.* Every ingest module's
+cross-ref step should call a helper shaped like this and keep the model on the prose.
+
 ### Where these land in the module checkpoints
 
 Fold into the checkpoints already sketched above:

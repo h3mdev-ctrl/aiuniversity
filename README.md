@@ -392,6 +392,12 @@ Next, in order:
     `monthly/` synthesis that every future session starts from — a compounding brain,
     not a notes folder. Reuses the `autolearn` drain (a scheduled rollup is just the
     drain pointed at notes instead of commits) — no new memory machinery.
+  - **Worked example — [`docs/examples/vault_crosslink.py`](docs/examples/vault_crosslink.py):**
+    the mechanical half of cross-linking (backlink reciprocity, broken-link + leak
+    detection) done as a **model-free script**. Validated on a real 853-page wiki: it
+    added 121 missing backlinks for **0 model tokens** (vs ~150–350k by hand). The
+    lesson the ingest modules inherit: *script the plumbing, keep the model on the
+    prose.* See [`docs/planned-knowledge-ingest.md`](docs/planned-knowledge-ingest.md).
 - **`shared-context` module (Layer 3)** — a shared, append-only **live-context log**
   with a read-before-reply / append-after-turn invariant, so multiple Claude instances
   (bridge, cloud, scheduled tasks, worktrees) coordinate instead of drifting. The one
