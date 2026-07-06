@@ -16,11 +16,18 @@
 # On a working machine doctor can report "unhealthy" purely from content-sync
 # noise while gbrain is perfectly usable. The pack checks USABILITY, not a score.
 #
-# THE MENTAL MODEL FIRST: files/gbrain_hub_model.md -- gbrain is the ONE hub you
-# talk to; work / trading / projects (solar, electricity) / health / people are all
-# SPOKES that feed it. The #1 newcomer mistake is framing it as the mirror of ONE
-# project (so it sounds like a notes app and underwhelms). Read the hub model before
-# trying to explain "how is gbrain useful for me?" -- it includes the explain-it script.
+# THE MENTAL MODEL FIRST: files/gbrain_hub_model.md -- gbrain is the ONE hub you talk
+# to; work / business / hobbies / side projects / people are all SPOKES that feed it.
+# The #1 newcomer mistake is framing it as the mirror of ONE project (so it sounds
+# like a notes app and underwhelms). Read the hub model before trying to explain
+# "how is gbrain useful for me?" -- it includes the explain-it script.
+#
+# WHAT THE HUB BECOMES (the growth path): files/gbrain_growth_path.md -- the ladder
+# from a few notes to a load-bearing brain (entity graph -> eager capture -> ingest a
+# corpus -> code intelligence -> nightly automation), what each rung gives you, the
+# governing principle (more SIGNAL = more useful, because recall + connections scale),
+# and the lean-vs-eager token-cost table. Show this to a user asking "what will this
+# actually do for me if I keep building it?"
 #
 # HOW TO STRUCTURE YOUR BRAIN once it's live: see files/example_brain_filing.md
 # (slug conventions + a resolver-page filing map) and files/example_brain_page.md
@@ -110,18 +117,27 @@ steps:
   - id: usage-discipline
     instruction: >
       Make gbrain HABITUAL, not just installed -- a brain nobody is told to use stays
-      empty. Writes a usage-discipline block into your constitution (CLAUDE.md).
-      Defaults to the LEAN cadence: search the brain before researching, and capture
-      only what's clearly worth keeping -- NOT on every message, so there's no
-      per-turn token tax. (Registering gbrain as an MCP already makes its tools
-      available; this governs how aggressively Claude ACTS on that.) Power users who
-      want maximal capture on every message can re-run with --eager. Complements
-      gstack's "GBrain Search Guidance" block (search-vs-grep only).
+      empty. Writes a usage-discipline block into CLAUDE.md, and OFFERS THE USER A
+      CADENCE CHOICE (don't pick for them -- installing this pack means they want to
+      use gbrain; let them choose HOW aggressively):
+        - LEAN (default): search before researching + capture only what's clearly
+          worth keeping. No per-message tax. ~5-15k tokens/session. Right for most.
+        - EAGER: scan EVERY message and capture ideas/entities as they come up.
+          Maximal capture + densest recall, but ~3-5x the tokens (~30-80k/session)
+          and a little latency per reply. For power users who want the brain to fill
+          fast and will keep the signal high.
+      Present that tradeoff and install THEIR pick. See files/gbrain_growth_path.md
+      for what building on the hub becomes (code brain, ingest pipeline, automation)
+      + the full cost table. (Registering gbrain as MCP makes the tools available;
+      this governs how aggressively Claude ACTS on that.) Complements gstack's
+      "GBrain Search Guidance" block (search-vs-grep only).
     check:
       type: command_succeeds
       cmd: python packs/gbrain-windows/files/setup_gbrain_usage.py --check
     on_fail: >
-      The gbrain usage discipline isn't in your CLAUDE.md yet, so Claude will only
-      use gbrain when explicitly asked. Install the lean default (idempotent):
-      python packs/gbrain-windows/files/setup_gbrain_usage.py --install
-      (add --eager for every-message capture if you want maximal compounding + cost.)
+      The gbrain usage discipline isn't in your CLAUDE.md yet, so Claude will only use
+      gbrain when explicitly asked. Offer the user LEAN vs EAGER (the cadence tradeoff
+      above -- token cost + capture), then install their pick (idempotent):
+        lean:   python packs/gbrain-windows/files/setup_gbrain_usage.py --install
+        eager:  python packs/gbrain-windows/files/setup_gbrain_usage.py --install --eager
+      Don't default silently -- present the choice.

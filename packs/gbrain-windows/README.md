@@ -21,8 +21,11 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
 - **`activation-exam`** runs a real question through the full pipeline (embeddings +
   DB + ranking) — proving gbrain is genuinely live, not merely installed.
 - **`usage-discipline`** writes a usage block into `CLAUDE.md` so Claude USES the
-  brain, LEAN by default (search-first + capture-what-matters, no per-turn tax),
-  `--eager` opt-in.
+  brain, and **offers the user a cadence choice** (not a silent default): **lean**
+  (search-first + capture-what-matters, ~5–15k tokens/session) vs **eager** (scan
+  every message, ~3–5× the tokens for maximal capture). `gbrain_growth_path.md` shows
+  what the hub becomes as you climb (entity graph → eager → ingest a corpus → code
+  intelligence → automation) + the full cost table.
 
 ## Iron Laws
 
