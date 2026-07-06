@@ -16,6 +16,12 @@
 # On a working machine doctor can report "unhealthy" purely from content-sync
 # noise while gbrain is perfectly usable. The pack checks USABILITY, not a score.
 #
+# THE MENTAL MODEL FIRST: files/gbrain_hub_model.md -- gbrain is the ONE hub you
+# talk to; work / trading / projects (solar, electricity) / health / people are all
+# SPOKES that feed it. The #1 newcomer mistake is framing it as the mirror of ONE
+# project (so it sounds like a notes app and underwhelms). Read the hub model before
+# trying to explain "how is gbrain useful for me?" -- it includes the explain-it script.
+#
 # HOW TO STRUCTURE YOUR BRAIN once it's live: see files/example_brain_filing.md
 # (slug conventions + a resolver-page filing map) and files/example_brain_page.md
 # (the shape of a good page). Modeled on a real, heavily-used brain -- copy the

@@ -13,8 +13,11 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
 - **Runs real modules end to end** — `layer-1-memory` → `memory` pack,
   `layer-0-identity` → `identity` pack, `layer-3-guardrails` → `guardrails` pack,
   `layer-4-capabilities` → `gbrain-windows` pack.
-- **Inline checks for the file-only layers** — `layer-2-constitution` (a global
-  `CLAUDE.md` exists) and `layer-5-durability` (a `~/.claude/projects` folder exists).
+- **`layer-2-constitution`** — seeds the two sections newcomers always miss into
+  the global `CLAUDE.md`: an **operating principle** (verify + plan before executing;
+  learn from proven setups) and **skill routing** (invoke a matching skill first, with
+  a trigger table). Idempotent, marker-fenced. `layer-5-durability` is an inline check
+  (a `~/.claude/projects` folder exists).
 - **Ordering is load-bearing** — memory runs BEFORE identity because identity files
   a `user_profile` INTO the memory system the memory step created.
 - **v1 is a working slice**, not all six layers at full depth — it proves the
