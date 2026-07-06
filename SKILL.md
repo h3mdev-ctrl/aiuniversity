@@ -171,3 +171,38 @@ the exact improvisation this product replaces -- and it is usually wrong: a
 (a dark memory file, an unregistered MCP) that the "it's probably fine" instinct
 would have missed. Deliberate *after* you have the facts, not instead of getting
 them. Run first; report; then advise.
+
+## When it overlaps what the user already has -- present the choice, don't gatekeep
+
+**The user installed this pack because they want to level up. That is the frame.**
+Your job is to help them level up, not to protect them from complexity they chose.
+
+When a pack overlaps something the user already does (an existing memory folder, a
+manual habit, a tool they run), the failure mode is to pre-decide for them --
+"you already do this, SKIP it", "not worth it", "you've already solved this". That
+is gatekeeping. It converts the pack's own caveats (an Iron Law, a cost note, a
+"don't run two of these") into a verdict *against* adopting -- when those caveats
+are meant to inform the choice, not make it. And it patronises a user who, by
+installing, told you they want the upgrade.
+
+Do this instead:
+
+- **Name the overlap honestly, then present pros/cons and ASK.** Lay out what the
+  pack ADDS over their current approach (automation, a deterministic gate,
+  verification, capture they'd otherwise forget) AND the real cost (a hook, a
+  config change, a migration). Then let *them* decide. Use AskUserQuestion; don't
+  answer for them.
+- **Overlap is rarely redundancy.** A *manual habit* done well is still a habit --
+  the automated + gated version usually adds rigor the habit can't: it fires even
+  when they forget, and it refuses to write a malformed or duplicate result. Say
+  that; don't flatten "I do this by hand" into "this is redundant".
+- **A caveat is a migration note, not a stop sign.** "Don't run two of these
+  against the same store" means *if you adopt this, retire the old one, or keep
+  yours -- your call*. It never means "so skip this one".
+- **Genuine redundancy is rare -- and it's still the user's call.** If a pack truly
+  adds nothing over what they run (same mechanism, same rigor), say so plainly as
+  ONE input to their decision. You still ask; you don't skip on their behalf.
+
+The test: after you speak, could the user make a different choice than the one you'd
+have picked, with full information? If your framing only supports one answer, you
+gatekept. Give them the real tradeoff and the decision.

@@ -42,10 +42,15 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
   is refused; the original is kept. A genuine extension passes.
 - **`supersede` stamps in place; it does NOT delete.** Provenance is preserved
   behind a `<!-- superseded-banner -->` and `status: superseded` frontmatter.
-- **Do not run two personal drains against the same memory.** `global-evolution`
-  is Andrew's mature personal drain; the aiuniversity autolearn is the shipped
-  product. Running both writes near-duplicates into the same folder (his current
-  posture: only global-evo is scheduled on his box, autolearn is the artifact).
+- **Don't run two drains against the same memory -- pick one (a migration note,
+  not a "skip").** If you already run a memory-drain, adopting this one means
+  retiring the other, OR keeping yours -- your call. Running both writes
+  near-duplicates into the same folder. This is a choice to put to the user (what
+  does this add over what you run?), never a reason to skip the pack on their
+  behalf. Overlap with an existing habit is usually not redundancy: a manual
+  "write a memory when I find a fix" discipline is real, but this adds capture on
+  every commit + a deterministic gate + rollback, so it fires when you forget and
+  refuses to file a malformed or duplicate lesson.
 
 ## Anti-Patterns
 
