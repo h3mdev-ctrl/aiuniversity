@@ -43,6 +43,10 @@ def test_block_has_the_load_bearing_sections(tmp_path):
     assert "## Skill routing" in text
     assert "invoke" in text.lower() and "| Trigger | Skill |" in text  # the example table
     assert "gbrain_hub_model" in text                    # points at the mental model
+    # present-the-choice / don't-defer (feedback_dont_reflex_defer, generalised)
+    low = text.lower()
+    assert "present decisions" in low or "don't pre-make" in low
+    assert "gatekept" in low or "let the user choose" in low
 
 
 def test_install_is_idempotent_and_preserves_existing(tmp_path):
