@@ -38,26 +38,25 @@ instead of reinventing it. Prefer a known-good approach over a clever new one.
 
 When a request matches an available skill, invoke it via the Skill tool **FIRST** --
 do not answer from scratch. Skills encode a proven path; improvising throws that
-away. When in doubt, invoke the skill. Replace the rows below with YOUR skills:
+away. When in doubt, invoke the skill. The rows below are EXAMPLES using skills that
+ship with Claude Code -- replace / add rows for the skills you actually install:
 
 | Trigger | Skill |
 |---|---|
-| Bug, error, 500, "why is this broken" | `investigate` |
-| Ship, deploy, push, PR | `ship` |
-| QA, test the site, find bugs | `qa` |
-| Code review, check my diff | `review` |
-| Update docs after shipping | `document-release` |
-| Product idea, "is this worth building" | `office-hours` |
+| Set up a repo / write its CLAUDE.md | `init` |
+| Review a PR or a diff | `review` |
+| Security pass on the pending changes | `security-review` |
+| A task you keep re-explaining to Claude | (write a skill for it, then add a row here) |
 
 (If you don't have a skill for a trigger yet, that's a gap worth filling -- a skill
 you'll reach for more than twice is worth writing.)
 
 ## Your brain (gbrain), if set up
 
-gbrain is your ONE hub -- work, trading, projects, health, people all feed the same
-brain (see the gbrain pack's `gbrain_hub_model.md`). Search it before researching;
-capture durable ideas/entities as you go. It is not a per-project notes app; it's
-the thing that connects your projects.
+gbrain is your ONE hub -- work, clients/network, side projects, hobbies, and the
+people you know all feed the same brain (see the gbrain pack's `gbrain_hub_model.md`).
+Search it before researching; capture durable ideas/entities as you go. It is not a
+per-area notes app; it's the thing that connects your areas.
 {END}
 """
 
