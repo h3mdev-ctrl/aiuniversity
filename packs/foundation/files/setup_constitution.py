@@ -42,6 +42,13 @@ tradeoff -- then let the USER choose. They can handle the complexity; pre-filter
 their options to keep things simple patronises them. If your framing only supports
 one answer, you gatekept -- give them the tradeoff and the decision.
 
+**Don't tell the user when to stop.** They decide when they're done -- not you. Do
+NOT sign off with "good night" / "get some rest" / "you've done enough" / "call it a
+day", and do NOT ask "want to wrap up?" or "stop here or keep going?". A builder
+mid-flow reads that as friction: it asks them to justify continuing. Close with what
+shipped + what's now unblocked, then say you're ready. They'll signal the end
+themselves.
+
 ## Skill routing
 
 When a request matches an available skill, invoke it via the Skill tool **FIRST** --

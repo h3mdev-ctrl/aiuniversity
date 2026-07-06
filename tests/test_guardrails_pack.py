@@ -125,9 +125,10 @@ def test_test_blocking_mode_passes_after_install(tmp_path):
 # --- pack ------------------------------------------------------------------
 
 
-def test_pack_loads_with_three_steps():
+def test_pack_loads_with_its_steps():
     pack = load_pack(REPO / "packs" / "guardrails" / "pack.yaml")
     assert pack.name == "guardrails"
     assert [s.id for s in pack.steps] == [
         "hook-installed", "registered-in-settings", "guard-actually-blocks",
+        "session-end-guard",
     ]

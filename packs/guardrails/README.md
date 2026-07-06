@@ -1,10 +1,16 @@
 # guardrails
 
 Layer 3 of the foundation — **automatic backstops that catch mistakes by CODE, not
-by hoping**. v1 ships one core guard: a PreToolUse hook that blocks Claude from
-reading credential files (`.env`, private keys, `.aws/credentials`, etc.) via
-`Read` OR `Bash` (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`). Its check
-proves the guard actually *fires* end to end — a real gate, not a present file.
+by hoping**. Ships two guards, each proven by a behavioural check (a real gate, not a
+present file):
+- **credential guard** — a PreToolUse hook that blocks Claude reading credential files
+  (`.env`, private keys, `.aws/credentials`) via `Read` OR `Bash`
+  (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`).
+- **session-end guard** — a Stop hook that bounces Claude when it signs off with "go
+  rest / call it a day / you've done enough" (a builder decides when they're done).
+  Smarter than a naive phrase guard: it SKIPS quoted context (a phrase in code or a
+  blockquote is Claude *quoting the rule*, not signing off), so it won't false-fire
+  when discussing the rule itself.
 
 See [pack-structure.md](../../docs/pack-structure.md) for the section conventions.
 
