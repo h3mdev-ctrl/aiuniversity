@@ -128,7 +128,8 @@ def test_test_blocking_mode_passes_after_install(tmp_path):
 def test_pack_loads_with_its_steps():
     pack = load_pack(REPO / "packs" / "guardrails" / "pack.yaml")
     assert pack.name == "guardrails"
+    # session-end guard is OPT-IN (shipped, not a default step) -- it error-badges too
+    # often for a first-run; the constitution principle is the default soft version.
     assert [s.id for s in pack.steps] == [
         "hook-installed", "registered-in-settings", "guard-actually-blocks",
-        "session-end-guard",
     ]

@@ -49,21 +49,15 @@ steps:
       The guard didn't block a known-forbidden action (see output). Reinstall:
       python packs/guardrails/files/setup_guardrails.py
 
-  - id: session-end-guard
-    instruction: >
-      A quality-of-life backstop: install a Stop hook that bounces Claude when it
-      signs off with "good night" / "get some rest" / "you've done enough" / "call it
-      a day" -- a builder mid-flow decides when they're done, and being told to rest
-      is friction. The constitution already SAYS this (foundation layer 2); this
-      makes it stick by CODE. Ships smarter than a naive phrase guard: it SKIPS quoted
-      context (a phrase inside code or a blockquote is Claude quoting the rule, not
-      signing off), so it won't false-fire when discussing the rule itself.
-    check:
-      type: command_succeeds
-      cmd: python packs/guardrails/files/setup_session_guard.py --test-blocking
-    on_fail: >
-      Install the session-end guard (writes the hook + registers it as a Stop hook,
-      idempotent merge):
-      python packs/guardrails/files/setup_session_guard.py
-      Then the check proves it bounces a real sign-off, ignores a quoted phrase, and
-      lets a clean close through.
+# NOTE: the session-end guard (setup_session_guard.py / session_end_guard.py) is
+# shipped but NOT a default step -- it's OPT-IN. It's a Stop hook, so it can only
+# nudge by exiting non-zero, which the desktop shows as an "Error" badge; and it's a
+# common-language guard (it reacts whenever Claude mentions "good night" / "call it a
+# day"), so on by default it would error-badge constantly -- a bad first-run for a
+# self-improvement pack. The SOFT version ships by default instead: the constitution
+# principle "don't tell the user when to stop" (foundation layer-2-constitution),
+# which is always-loaded and creates no error state. Install the hard hook ONLY if
+# that soft principle keeps getting ignored and you want enforcement:
+#   python packs/guardrails/files/setup_session_guard.py            # install
+#   python packs/guardrails/files/setup_session_guard.py --test-blocking
+# See README.md "The session-end guard is opt-in".

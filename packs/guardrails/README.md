@@ -1,16 +1,35 @@
 # guardrails
 
 Layer 3 of the foundation — **automatic backstops that catch mistakes by CODE, not
-by hoping**. Ships two guards, each proven by a behavioural check (a real gate, not a
-present file):
-- **credential guard** — a PreToolUse hook that blocks Claude reading credential files
-  (`.env`, private keys, `.aws/credentials`) via `Read` OR `Bash`
-  (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`).
-- **session-end guard** — a Stop hook that bounces Claude when it signs off with "go
-  rest / call it a day / you've done enough" (a builder decides when they're done).
-  Smarter than a naive phrase guard: it SKIPS quoted context (a phrase in code or a
-  blockquote is Claude *quoting the rule*, not signing off), so it won't false-fire
-  when discussing the rule itself.
+by hoping**. The **default** guard is proven by a behavioural check (a real gate, not
+a present file):
+- **credential guard** (default) — a PreToolUse hook that blocks Claude reading
+  credential files (`.env`, private keys, `.aws/credentials`) via `Read` OR `Bash`
+  (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`). Fires rarely (only on a real
+  secret read), so it doesn't get in your way.
+
+### The session-end guard is opt-in
+
+Also shipped, but **NOT installed by default**: a Stop hook that bounces Claude when
+it signs off with "go rest / call it a day / you've done enough" (a builder decides
+when they're done). Two reasons it's opt-in, not default:
+
+- **A Stop hook can only nudge by exiting non-zero**, which the desktop surfaces as an
+  **"Error" badge**. That's tolerable for a rare security block; it's the wrong first
+  impression for a QoL nudge.
+- **It's a common-language guard** — it reacts whenever Claude *mentions* the phrases,
+  not just when it signs off. On by default it would error-badge constantly, including
+  on the install summary itself. Installing a *self-improvement* pack should not make
+  your session throw errors.
+
+So the **default is the soft version**: the constitution principle "don't tell the
+user when to stop" (foundation `layer-2-constitution`) — always-loaded, no error
+state. Install the hard hook only if that keeps getting ignored and you want
+enforcement: `python packs/guardrails/files/setup_session_guard.py`. It's built
+smart — it SKIPS quoted context (code spans, fenced blocks, blockquotes, and
+double-quoted prose) so it won't fire when Claude is *quoting* the rule rather than
+signing off — but even a perfect quote-skip can't make a Stop hook stop error-badging
+when it legitimately fires, which is why it's your choice, not the default.
 
 See [pack-structure.md](../../docs/pack-structure.md) for the section conventions.
 
