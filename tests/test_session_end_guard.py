@@ -32,6 +32,16 @@ def test_quoted_phrase_is_skipped():
     assert not guard.find_violations("> call it a day\n\nHere's the summary.")
     # fenced block
     assert not guard.find_violations("Banned list:\n```\ngood night\nsleep well\n```\nok.")
+    # plain double-quoted prose (Jason's real-world false positive, 2026-07-07)
+    assert not guard.find_violations('My last message quoted the phrases "good night" / "want to wrap up".')
+    assert not guard.find_violations('the "good night" and "you\'ve done enough" sign-offs are banned')
+    # curly double quotes (what markdown/smart-quotes render)
+    assert not guard.find_violations("it flagged “good night” as a sign-off")
+
+
+def test_single_quotes_are_NOT_stripped_apostrophe_safety():
+    # contractions must survive -- a real prose sign-off with an apostrophe still fires
+    assert guard.find_violations("You've done enough for today, good night!")
 
 
 def test_clean_close_passes():

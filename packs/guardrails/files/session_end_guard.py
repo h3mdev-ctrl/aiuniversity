@@ -30,10 +30,19 @@ BANNED = [
 
 def strip_quoted(text: str) -> str:
     """Remove the places a model QUOTES the rule rather than signs off: fenced code
-    blocks, inline code spans, and blockquote lines. Matching the remainder means a
-    phrase only counts when it's in plain prose."""
+    blocks, inline code spans, "double-quoted" prose (straight + curly), and
+    blockquote lines. Matching the remainder means a phrase only counts when it's
+    genuinely part of the sign-off, not being described.
+
+    Double quotes are the most common way to quote a phrase (`the "good night"
+    sign-off`), so skipping them is essential -- reported by a real user (Jason's
+    setup) as the first false positive after the backtick/blockquote fix, 2026-07-07.
+    Single quotes are deliberately NOT stripped: apostrophes in contractions
+    (don't, you've) would mangle the text and could hide a real violation."""
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)   # fenced blocks
     text = re.sub(r"`[^`]*`", " ", text)                       # inline code
+    text = re.sub(r'"[^"]*"', " ", text)                       # straight double quotes
+    text = re.sub("“[^”]*”", " ", text)         # curly double quotes
     text = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith(">"))
     return text
 
