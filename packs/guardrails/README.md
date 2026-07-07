@@ -31,6 +31,33 @@ double-quoted prose) so it won't fire when Claude is *quoting* the rule rather t
 signing off — but even a perfect quote-skip can't make a Stop hook stop error-badging
 when it legitimately fires, which is why it's your choice, not the default.
 
+### The recon-before-build guard is opt-in
+
+Also shipped, **NOT installed by default**: a PreToolUse(`Write`) hook that bounces the
+**first Write of a NEW source file into a repo that already has source files** — the
+exact moment Claude is most likely to build a *parallel* module instead of reading and
+extending the one that's already there. It fires **once per session per repo**, then
+gets out of the way (a nudge, not a wall): read the neighbours, say what exists and the
+gap, Write again, done.
+
+Why a hook and not just the principle: *"stand on the shoulders of giants — don't
+reinvent"* is always loaded and **still gets skipped**, because when a task says "build
+X" and there's enough context to start typing, acting feels like progress and reading
+feels like delay. A memory *hopes to be recalled*; a PreToolUse hook fires **on the
+action** — same reason the session-end Stop hook beats the stop-phrase memory. The
+motivating case: a Claude re-derived a whole subset-sum matcher and its edge cases that
+already lived ~40 lines away in the same folder, over hours, because it never read the
+file — then wrote a memory titled "read existing code first" and *still* had to be asked
+three times before it opened the file. Passive artifacts lose to an active impulse.
+
+Opt-in for the same reason as the session guard: fired on every new file it would be
+noisy, and the **soft default already ships** — the constitution principle "Recon before
+build" (foundation `layer-2-constitution`), always-loaded, no error state. It's tuned to
+stay quiet on genuine new work (ignores existing-file overwrites, doc/config/data files,
+and fresh/sparse directories — only an *established* codebase triggers it). Install the
+hard nudge only if the soft principle keeps getting ignored:
+`python packs/guardrails/files/setup_recon_build_guard.py`.
+
 See [pack-structure.md](../../docs/pack-structure.md) for the section conventions.
 
 ## Contract

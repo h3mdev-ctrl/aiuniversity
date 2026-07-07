@@ -61,3 +61,15 @@ steps:
 #   python packs/guardrails/files/setup_session_guard.py            # install
 #   python packs/guardrails/files/setup_session_guard.py --test-blocking
 # See README.md "The session-end guard is opt-in".
+#
+# NOTE: the recon-before-build guard (setup_recon_build_guard.py /
+# recon_before_build_guard.py) is ALSO shipped but NOT a default step -- opt-in, same
+# reasoning. It's a PreToolUse(Write) hook that bounces the FIRST Write of a NEW source
+# file into an already-populated repo (once per session per repo), so Claude reads the
+# existing code before building a parallel version of it. The SOFT default ships in the
+# constitution instead ("Recon before build", foundation layer-2-constitution) -- always
+# loaded, no error state. Install the hard hook ONLY when the soft principle keeps getting
+# ignored and you want the nudge to fire at the moment of the Write:
+#   python packs/guardrails/files/setup_recon_build_guard.py            # install
+#   python packs/guardrails/files/setup_recon_build_guard.py --test-blocking
+# See README.md "The recon-before-build guard is opt-in".

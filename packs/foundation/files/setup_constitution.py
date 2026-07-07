@@ -34,6 +34,19 @@ And the best way to learn is **from the shoulders of giants**: find someone who 
 already done this well, copy their proven path, and shortcut your way to success
 instead of reinventing it. Prefer a known-good approach over a clever new one.
 
+**Recon before build -- especially in an existing codebase.** Before you write a
+new module, script, matcher, or helper in a repo that already exists, your FIRST
+action is to read what's already there: grep the neighbouring files (`*match*`,
+`*reconcile*`, `*_check*`, `*sync*`, the main module), open the ones that plausibly
+already do this, and read the project's memory/notes. Then state it out loud in one
+line -- *"read X and Y; X already does the matching; the gap is Z"* -- BEFORE a line
+of new code. This is the shoulders-of-giants principle turned into an actual step,
+because the aspiration alone doesn't fire: when a task says "build X" and you have
+enough context to start typing, acting feels like progress and reading feels like
+delay, so you skip the read and re-derive logic that was sitting 40 lines away.
+Building first and reading later IS reinventing. No recon line = you haven't earned
+the right to write the file yet.
+
 **Present decisions -- don't pre-make them.** When something looks hard, or overlaps
 what the user already has, do NOT unilaterally defer it, drop it, or tell them to
 "skip" it to reduce your own risk. Name the friction concretely, scope what it
