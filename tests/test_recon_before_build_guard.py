@@ -124,3 +124,18 @@ def test_constitution_seeds_the_recon_principle():
     text = re.sub(r"\s+", " ", raw)
     assert "recon before build" in text
     assert "building first and reading later is reinventing" in text
+
+
+def test_fails_open_on_malformed_input(tmp_path):
+    """A guard must never wedge work: garbage/empty/unexpected input -> exit 0 (allow),
+    never a non-zero that would silently block every Write. (Jason, 2026-07-08.)"""
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path))
+    def run(stdin):
+        return subprocess.run([sys.executable, str(FILES / "recon_before_build_guard.py")],
+                              input=stdin, capture_output=True, text=True, env=env,
+                              encoding="utf-8").returncode
+    assert run("not json at all {{{") == 0
+    assert run("") == 0
+    assert run("null") == 0
+    assert run(json.dumps({"tool_name": "Write"})) == 0          # no tool_input
+    assert run(json.dumps({"tool_input": {"file_path": 12345}})) == 0  # wrong type

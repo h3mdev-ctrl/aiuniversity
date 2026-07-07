@@ -104,28 +104,34 @@ def _already_nudged(session_id: str, key: str) -> bool:
 
 
 def main() -> int:
+    # FAIL OPEN on ANY error. A guard must never wedge work: if this hook can't parse
+    # its input or hits an unexpected exception, it ALLOWS the action (exit 0) rather
+    # than blocking it. A PreToolUse hook exiting non-zero for a reason other than a
+    # deliberate bounce would silently break every matched Write. (Jason, real-machine
+    # install, 2026-07-08.)
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-    except (json.JSONDecodeError, ValueError):
+        nudge, ext, n, dirname = _should_nudge(payload)
+        if not nudge:
+            return 0
+        fp = (payload.get("tool_input") or payload.get("toolInput") or {}).get("file_path") \
+            or (payload.get("tool_input") or {}).get("path") or ""
+        key = _repo_key(pathlib.Path(fp))
+        session_id = str(payload.get("session_id") or payload.get("sessionId") or "")
+        if _already_nudged(session_id, key):
+            return 0
+        sys.stderr.write(
+            f"RECON BEFORE BUILD -- you're about to Write a NEW {ext} file into '{dirname}/', "
+            f"which already holds {n} {ext} files. This is the moment a parallel module gets "
+            f"built instead of extending the one already there.\n"
+            f"FIRST: grep the neighbours (*match*/*reconcile*/*_check*/*sync*/the main module) "
+            f"+ read the project memory, open the ones that plausibly already do this, and say "
+            f"in one line what exists and the real gap. If you've done that recon, just Write "
+            f"again -- this won't fire again for this repo this session.\n"
+        )
+        return 2
+    except Exception:
         return 0
-    nudge, ext, n, dirname = _should_nudge(payload)
-    if not nudge:
-        return 0
-    fp = (payload.get("tool_input") or {}).get("file_path", "")
-    key = _repo_key(pathlib.Path(fp))
-    session_id = str(payload.get("session_id") or payload.get("sessionId") or "")
-    if _already_nudged(session_id, key):
-        return 0
-    sys.stderr.write(
-        f"RECON BEFORE BUILD -- you're about to Write a NEW {ext} file into '{dirname}/', "
-        f"which already holds {n} {ext} files. This is the moment a parallel module gets "
-        f"built instead of extending the one already there.\n"
-        f"FIRST: grep the neighbours (*match*/*reconcile*/*_check*/*sync*/the main module) "
-        f"+ read the project memory, open the ones that plausibly already do this, and say "
-        f"in one line what exists and the real gap. If you've done that recon, just Write "
-        f"again -- this won't fire again for this repo this session.\n"
-    )
-    return 2
 
 
 if __name__ == "__main__":

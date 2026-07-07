@@ -58,6 +58,26 @@ and fresh/sparse directories — only an *established* codebase triggers it). In
 hard nudge only if the soft principle keeps getting ignored:
 `python packs/guardrails/files/setup_recon_build_guard.py`.
 
+### Writing a new PreToolUse hook — three rules (from a real install)
+
+If you author your own guard, these three cost real time to learn the hard way
+(reported by Jason from a real Windows install, 2026-07-08). Every guard in this pack
+follows them:
+
+1. **Fail open — a guard must never wedge work.** On any bad input or unexpected
+   error, `exit 0` (allow), never a stray non-zero. A PreToolUse hook that exits
+   non-zero for a reason other than a deliberate bounce silently breaks *every*
+   matched tool call. Wrap your logic in `try/except Exception: return 0`.
+2. **Write the script first, register it second (chicken-and-egg).** If
+   `settings.json` points a matcher at a hook file that doesn't exist yet, the
+   interpreter can't open it → non-zero → every matched `Write`/`Edit`/`Read` fails
+   until you create the file. The installers here always write the hook file *before*
+   merging the registration.
+3. **The Windows test-JSON trap.** Feeding a raw Windows path (`C:\Users\...`) into
+   `json.loads` throws `Invalid \escape` — backslashes are JSON escape chars. Build
+   test payloads with `json.dumps` (which escapes them) or use forward-slash paths.
+   Otherwise the hook fails open and *looks* broken when it isn't.
+
 See [pack-structure.md](../../docs/pack-structure.md) for the section conventions.
 
 ## Contract
