@@ -328,6 +328,7 @@ aiuniversity/
     memory/             sets up a compounding memory + always-loaded resolver index
     guardrails/         PreToolUse hooks that block credential reads (proven to fire)
     gbrain-windows/     gbrain set up + proven live on Windows
+    windows-shell/      general Windows shell footguns (Python UTF-8/SSL, PS 5.1 .ps1)
     obsidian-wiki/      a free-publishable LLM wiki, linked into memory
     autolearn/          a git post-commit hook -> lessons filed into memory at wrap-up
   tests/                198 tests
@@ -366,6 +367,10 @@ Packs:
   (search-first before researching, capture only what's clearly worth keeping, no
   per-turn token tax), with an opt-in **`--eager`** cadence for power users who want
   every-message capture.
+- **windows-shell** — general Windows dev-shell hardening (no tool required):
+  detects the three silent traps every Windows user hits — Python defaulting off
+  UTF-8, Python 3.14 failing HTTPS cert verification, and PowerShell 5.1 silently
+  skipping blocks in a non-ASCII `.ps1` — and hands over the proven fix for each.
 - **obsidian-wiki** — an LLM wiki linked into memory; choose **local** (on disk)
   or **hosted** (published free via Quartz → Vercel/Pages). Knowledge branch.
 - **autolearn** — a phantom-style wrap-up: a git post-commit hook captures every
