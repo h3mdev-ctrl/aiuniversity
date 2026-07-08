@@ -28,18 +28,20 @@ steps:
 
   - id: layer-2-constitution
     instruction: >
-      Your constitution: a global CLAUDE.md that tells Claude your environment, your
-      hard rules, AND -- the two sections newcomers always miss -- an OPERATING
-      PRINCIPLE (verify + plan before executing; learn from proven setups) and SKILL
-      ROUTING (invoke a matching skill FIRST, with a trigger table). This step seeds
-      both so Claude follows a known path instead of improvising. Edit the trigger
-      table to your own skills after; add your OS/shell + hard rules alongside.
+      Your constitution: a global CLAUDE.md that tells Claude your environment and hard
+      rules, AND -- the sections newcomers always miss -- an OPERATING PRINCIPLE block
+      (verify + plan before executing; shoulders-of-giants; recon before build; present
+      decisions, don't pre-make them; don't tell the user when to stop), SKILL ROUTING
+      (invoke a matching skill FIRST, with a trigger table), and a gbrain hub pointer.
+      This step seeds them so Claude follows a known path instead of improvising. Edit the
+      trigger table to your own skills after; add your OS/shell + hard rules alongside.
     check:
       type: command_succeeds
       cmd: python packs/foundation/files/setup_constitution.py --check
+    fix: python packs/foundation/files/setup_constitution.py --install
     on_fail: >
-      Your CLAUDE.md is missing the constitution core (operating principle + skill
-      routing). Seed it (idempotent; coexists with your existing rules):
+      Your CLAUDE.md is missing the constitution core (operating principle + skill routing
+      + gbrain hub). Seed it (idempotent; coexists with your existing rules):
       python packs/foundation/files/setup_constitution.py --install
       Then add your environment (OS, shell) + hard rules, and edit the skill-routing
       table to point at YOUR skills.
