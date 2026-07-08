@@ -41,7 +41,7 @@
 # codex, use structural-only or a cheap hosted model. Plus the openai:-not-ollama:
 # and cmd.exe-not-PS-2>&1 Windows traps.
 name: gbrain-windows
-version: 0.2.0
+version: 0.2.1
 variants: [local, supabase]
 default_variant: local
 steps:
@@ -67,10 +67,21 @@ steps:
     check:
       type: command_succeeds
       cmd: gbrain list -n 1
-    on_fail: >
-      gbrain can't reach a local brain. Create one (no account needed):
-      gbrain init --pglite
-      Then re-run `gbrain list -n 1`.
+    on_fail: |
+      gbrain can't reach a local brain. WHY it can't is the whole game here -- read
+      the actual error before you touch anything:
+
+      - "not found" / empty: no brain exists yet. Create one (no account needed):
+        `gbrain init --pglite`, then re-run `gbrain list -n 1`.
+      - "PGLite failed to initialize WASM runtime": on Windows this is usually a RED
+        HERRING -- it does NOT mean a missing or broken brain, so do NOT re-init (that
+        won't help and can throw away a good brain). Two real causes:
+          1. A stale lock -- another gbrain/claude process is still holding the DB file.
+             Close other gbrain/claude processes (or remove the leftover lock file) and
+             retry `gbrain list -n 1`. This fixes it most of the time.
+          2. Real corruption after an out-of-memory crash. ONLY if freeing locks didn't
+             help: rebuild the brain. The daily maintenance task does NOT self-heal this.
+        Rule: free locks and retry ONCE first; rebuild only if it still fails.
 
   - id: brain-reachable-supabase
     when: supabase
@@ -80,12 +91,20 @@ steps:
     check:
       type: command_succeeds
       cmd: gbrain list -n 1
-    on_fail: >
-      gbrain can't reach the Supabase brain. On Windows this is almost always the
-      URL: use the Supabase POOLER url (host like aws-0-...pooler.supabase.com:6543),
-      NOT the direct db.<project>.supabase.co host -- the direct host uses IPv6 and
-      times out on most Windows networks. Re-run:
-      gbrain init --supabase --url <pooler-url>
+    on_fail: |
+      gbrain can't reach the Supabase brain. Two Windows-specific causes, in order:
+
+      1. The URL (most common). Use the Supabase POOLER url (host like
+         aws-0-...pooler.supabase.com:6543), NOT the direct db.<project>.supabase.co
+         host -- the direct host uses IPv6 and times out on most Windows networks.
+         Re-run: `gbrain init --supabase --url <pooler-url>`.
+      2. A BOM in a hand-edited config. If the URL is right but it still fails AND you
+         edited gbrain's config/.env by hand in PowerShell: `Out-File` and `Set-Content`
+         prepend an invisible UTF-8 BOM (even with `-Encoding ascii`) that breaks
+         .env/.json/.yaml parsing -- the parser mis-reads the first line and the connect
+         silently fails, with an error that never mentions a BOM. Prefer letting
+         `gbrain init` write the file. If you must hand-edit, write it WITHOUT a BOM:
+         `[System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))`
 
   - id: mcp-registered
     instruction: >
