@@ -39,7 +39,7 @@ pinging you when he finds a better way. A pack bottles the second one.
 ## Why a newcomer's Claude gets stuck (the real reason)
 
 Here's the failure that started this. You download a genuinely powerful tool —
-say [gbrain](https://github.com), a knowledge brain that plugs into Claude — and
+say [gbrain](https://github.com/garrytan/gbrain), a knowledge brain that plugs into Claude — and
 getting it working turns into a multi-day grind. Worse: sometimes it *looks* set
 up but **isn't even switched on**, and nothing tells you.
 
@@ -235,7 +235,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 98 tests, all green
+python -m pytest tests/ -q      # 198 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -323,11 +323,14 @@ aiuniversity/
     verify.py           reads a pack, runs each check, escape-hatch state machine
     cli.py              the command SKILL.md calls (JSON out)
   packs/
-    foundation/         the umbrella: pulls in the memory + gbrain packs as modules
+    foundation/         the umbrella: pulls the memory + gbrain packs in as modules
+    identity/           an interview: who you are + how Claude should talk to you
     memory/             sets up a compounding memory + always-loaded resolver index
+    guardrails/         PreToolUse hooks that block credential reads (proven to fire)
     gbrain-windows/     gbrain set up + proven live on Windows
     obsidian-wiki/      a free-publishable LLM wiki, linked into memory
-  tests/                58 tests
+    autolearn/          a git post-commit hook -> lessons filed into memory at wrap-up
+  tests/                198 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -348,7 +351,7 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 98 tests green.
+teach/verify/remediate skill — 198 tests green.
 
 Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
