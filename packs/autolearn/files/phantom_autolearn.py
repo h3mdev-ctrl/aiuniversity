@@ -873,27 +873,59 @@ def check_workflow() -> int:
 
 
 def selftest() -> int:
-    # Prove the apply->consolidate path against an isolated throwaway memory.
+    """Behavioural exam of the whole write -> gate -> memory -> doctor path against
+    an ISOLATED throwaway memory (never the recipient's real one). Like guardrails'
+    --test-blocking, it proves the safety gate both BLOCKS the forbidden and ALLOWS
+    the good -- a gate that never refuses is an empty check. Stages:
+      1. the deterministic gate REFUSES a credential-bearing learning (HARD);
+      2. the gate ACCEPTS a clean, well-formed one;
+      3. that learning WRITES to disk AND is routed from the index;
+      4. the written memory PASSES the doctor (reachable + valid) -- the consolidate
+         stage, proven not just claimed.
+    """
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="autolearn_selftest_"))
     try:
         (tmp / "MEMORY.md").write_text(
             "# Memory\n\n## RESOLVER\n\n| When you're about to... | Consult |\n|---|---|\n",
             encoding="utf-8",
         )
-        fname = write_learning_to(
-            tmp,
-            {
-                "type": "feedback",
-                "name": "autolearn-selftest",
+        # 1. the gate MUST block a forbidden write (a credential in the body). This
+        #    is the pack's headline guarantee; without this line --selftest would
+        #    only prove the write function runs, not that the gate actually guards.
+        bad = {"type": "feedback", "name": "leaky-selftest",
+               "description": "when you're about to leak a secret",
+               "body": "the api key is sk-ant-abc12345deadbeef99 and it works"}
+        if not any(sev == "HARD" for sev, _ in validate_learning(bad, tmp)):
+            print("autolearn selftest: FAILED -- gate did NOT block a credential-bearing learning")
+            return 1
+        # 2. the gate MUST accept a clean, well-formed learning.
+        good = {"type": "feedback", "name": "autolearn-selftest",
                 "description": "when you're about to test autolearn",
-                "body": "selftest OK",
-                "resolver_intent": "when testing autolearn",
-            },
-        )
-        text = (tmp / "MEMORY.md").read_text(encoding="utf-8")
-        ok = (tmp / fname).exists() and "autolearn-selftest" in text
-        print("autolearn write path: OK" if ok else "autolearn write path: FAILED")
-        return 0 if ok else 1
+                "body": "selftest OK", "resolver_intent": "when testing autolearn"}
+        if any(sev == "HARD" for sev, _ in validate_learning(good, tmp)):
+            print("autolearn selftest: FAILED -- gate wrongly blocked a clean learning")
+            return 1
+        # 3. it writes AND is routed from the index.
+        fname = write_learning_to(tmp, good)
+        if not ((tmp / fname).exists() and "autolearn-selftest" in (tmp / "MEMORY.md").read_text(encoding="utf-8")):
+            print("autolearn selftest: FAILED -- write did not land / not routed from the index")
+            return 1
+        # 4. the written memory survives the doctor (the consolidate stage).
+        doctor = pathlib.Path(__file__).resolve().parent.parent.parent / "memory" / "files" / "memory_doctor.py"
+        if doctor.exists():
+            r = subprocess.run(
+                [sys.executable, str(doctor)],
+                capture_output=True, text=True, encoding="utf-8",
+                env=dict(os.environ, CLAUDE_MEMORY_HOME=str(tmp)),
+            )
+            if r.returncode != 0 or "HEALTHY" not in r.stdout:
+                print("autolearn selftest: FAILED -- doctor did not pass on the written memory")
+                print((r.stdout or r.stderr).strip()[-300:])
+                return 1
+            print("autolearn write->gate->memory->doctor: OK (gate blocks bad + allows good; doctor HEALTHY)")
+        else:
+            print("autolearn write->gate->memory: OK (gate blocks bad + allows good; doctor script not found, skipped)")
+        return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
