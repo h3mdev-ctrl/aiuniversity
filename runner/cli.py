@@ -76,6 +76,7 @@ def _run(pack_dir: str, apply_fixes: bool, variant: "str | None") -> int:
                 payload["stopped_step"] = {
                     "id": s["id"],
                     "instruction": s.get("instruction"),
+                    "fix": s.get("fix"),
                     "on_fail": s.get("on_fail"),
                 }
                 break

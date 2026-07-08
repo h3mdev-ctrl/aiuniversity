@@ -20,7 +20,7 @@ non-technical by preference.
 ```
   pack.yaml   (DATA — inert; the recipe; human-readable BEFORE you run it)
       │  name, version, steps[], modules[]
-      │  each step: instruction · check{type,cmd,expect} · fixture? · on_fail
+      │  each step: instruction · check{type,cmd,expect} · fixture? · fix? · on_fail
       ▼
   verify.py   (CODE — the ONLY thing that decides PASS/FAIL; ~200 lines)
       │  validate whole pack first → for each step: run check → match → verdict
@@ -30,7 +30,7 @@ non-technical by preference.
   SKILL.md    (AGENT — UX only, never renders a verdict)
          teach     → narrate each step, then verify
          verify    → call verify.py, report result
-         remediate → apply step.on_fail, re-verify;
+         remediate → apply step.fix (runnable), re-verify;
                      still red → STOP "human needed at step N"  (escape hatch)
 ```
 
@@ -39,7 +39,7 @@ Why this shape (the load-bearing reasons):
   is only guaranteeable if a program judges PASS/FAIL, never an agent interpreting. The
   agent narrates and remediates; it never decides.
 - **The recipe is auditable before it runs.** The yaml is inert data. The only executable
-  strings are `check.cmd` and `on_fail` — both visible in the file. This IS the security
+  strings are `check.cmd` and `fix` — both visible in the file. This IS the security
   section's "review the runbook before you run it" gate.
 - **modules: recursion is trivial** — load the referenced pack's yaml, run its steps inline
   with a prefixed id. One level of nesting for v1 (modules don't include modules — YAGNI).
@@ -68,7 +68,9 @@ steps:
       type: command_succeeds   # one of the 5 v1 types (below)
       cmd: "gbrain --version"
       expect: "gbrain"         # meaning depends on type
-    on_fail: "..."             # concrete prescribed fix (never 'reason about it')
+    fix: "gbrain init --pglite"  # RUNNABLE command remediate applies on a red check
+                                 # (mechanical steps only; a human/live step omits it)
+    on_fail: "..."             # human 'why + what', shown when it STOPS (never executed)
     teach: "lessons/install.md"  # optional narration file for teach mode
     fixture: null              # only for correctness checks (recorded expected answer)
 modules:                       # a step that runs another pack's runbook here
@@ -214,9 +216,11 @@ Fixed shape, every time — never a raw error dump:
 
 Four fixed parts: (1) which step + a plain-English name for what failed, (2) what it means in
 one sentence, (3) the exact prescribed fix — never "figure it out," (4) reassurance that the
-re-check is automatic. The `on_fail` field in `pack.yaml` supplies part 3; the runner frames
-parts 1, 2, 4. Authoring rule: every `on_fail` must be a concrete action a newcomer can copy,
-not advice.
+re-check is automatic. The `fix` field supplies the runnable command for part 3 (remediate
+applies it); the `on_fail` prose explains it for the human message; the runner frames parts
+1, 2, 4. Authoring rule: a mechanical step carries a runnable `fix:` (install/wire/link/create);
+a genuinely-human step (an interview, "add to your PATH", a live probe) omits `fix` and stops
+with `on_fail` prose — never shell-run English at the machine.
 
 ### Rule 3 — The stop-moment: a teacher asking for help, not a crash
 

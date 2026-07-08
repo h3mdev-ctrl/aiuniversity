@@ -40,6 +40,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/autolearn/files/phantom_autolearn.py --check-workflow
+    fix: python packs/autolearn/files/phantom_autolearn.py --install-workflow
     on_fail: >
       Workflow guide not installed. Install (copies it into your memory folder):
       python packs/autolearn/files/phantom_autolearn.py --install-workflow
@@ -51,6 +52,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/autolearn/files/phantom_autolearn.py --check-hook
+    fix: python packs/autolearn/files/phantom_autolearn.py --install-hook
     on_fail: >
       No autolearn hook yet. Install it (from inside your git repo):
       python packs/autolearn/files/phantom_autolearn.py --install-hook

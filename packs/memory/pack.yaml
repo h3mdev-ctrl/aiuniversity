@@ -24,6 +24,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/memory/files/setup_memory.py --check
+    fix: python packs/memory/files/setup_memory.py
     on_fail: >
       Run --find first to see the situation:
       python packs/memory/files/setup_memory.py --find
@@ -56,6 +57,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/memory/files/setup_memory.py --check-wire
+    fix: python packs/memory/files/setup_memory.py --wire
     on_fail: >
       Your CLAUDE.md doesn't reference the memory index yet. Wire it (idempotent):
       python packs/memory/files/setup_memory.py --wire

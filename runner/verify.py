@@ -82,7 +82,16 @@ class Step:
     # composition primitive).
     check: Optional[Check] = None
     module: Optional[str] = None  # ref to another pack, e.g. "gbrain-windows"
-    on_fail: Optional[str] = None  # concrete prescribed fix; None -> stop on red
+    # A step's prescribed fix has two halves, kept separate on purpose:
+    #   fix     -- the RUNNABLE command remediate executes on a red check. Present
+    #              only for mechanical steps (install a hook, wire a file); a
+    #              genuinely-human step (an interview, "add to your PATH") has none.
+    #   on_fail -- the human "why + what" prose, shown when the run STOPS. It feeds
+    #              the four-part failure message and is never executed. A step with
+    #              on_fail but no fix stops with that guidance instead of pretending
+    #              to self-heal.
+    fix: Optional[str] = None
+    on_fail: Optional[str] = None
     teach: Optional[str] = None
     # `when` gates a step to a chosen variant (e.g. local vs hosted). A step with
     # no `when` always runs; a `when` step runs only for the active variant.
@@ -245,10 +254,17 @@ def _build_step(raw: object, index: int, pack_name: str, variants: "list[str]") 
 
     check = _build_check(raw_check, where=f"{where} ({step_id!r})")
 
+    fix = raw.get("fix")
+    if fix is not None and not isinstance(fix, str):
+        raise PackValidationError(
+            f"{where} ({step_id!r}): `fix` must be a string command"
+        )
+
     return Step(
         id=step_id,
         instruction=instruction,
         check=check,
+        fix=fix,
         on_fail=raw.get("on_fail"),
         teach=raw.get("teach"),
         when=when,
@@ -387,9 +403,12 @@ def run_pack(
             outcomes.append(StepOutcome(full_id, "pass", result.reason, output))
             continue
 
-        # Red. Try the one prescribed fix, if any -- but only in remediate mode.
-        if apply_fixes and step.on_fail:
-            executor(step.on_fail)  # apply the fix
+        # Red. Apply the one RUNNABLE fix, if the step has one -- remediate mode
+        # only. `fix` is the command; `on_fail` is prose and is never executed, so
+        # a genuinely-human step (fix=None) stops here with its guidance rather
+        # than shell-running English at the machine.
+        if apply_fixes and step.fix:
+            executor(step.fix)  # apply the fix
             output, rc = _run_check(step.check, executor)  # re-check
             result = match(step.check.type, step.check.expect, output, rc)
             if result.passed:
@@ -489,6 +508,7 @@ def expand_steps(
                 "instruction": step.instruction,
                 "kind": "check",
                 "teach": step.teach,
+                "fix": step.fix,
                 "on_fail": step.on_fail,
             }
         )

@@ -20,6 +20,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/guardrails/files/setup_guardrails.py --check-hook-file
+    fix: python packs/guardrails/files/setup_guardrails.py
     on_fail: >
       Hook file missing. Install it (idempotent):
       python packs/guardrails/files/setup_guardrails.py
@@ -32,6 +33,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/guardrails/files/setup_guardrails.py --check-registered
+    fix: python packs/guardrails/files/setup_guardrails.py
     on_fail: >
       Not registered in settings.json. Register it (safe merge):
       python packs/guardrails/files/setup_guardrails.py
@@ -45,6 +47,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/guardrails/files/setup_guardrails.py --test-blocking
+    fix: python packs/guardrails/files/setup_guardrails.py
     on_fail: >
       The guard didn't block a known-forbidden action (see output). Reinstall:
       python packs/guardrails/files/setup_guardrails.py

@@ -89,7 +89,7 @@ def test_remediation_fixes_then_continues():
                     "id": "connect",
                     "instruction": "connect the thing",
                     "check": {"type": "contains", "cmd": "check_x", "expect": "live"},
-                    "on_fail": "fix_x",
+                    "fix": "fix_x",
                 }
             ],
         }
@@ -117,7 +117,7 @@ def test_stops_when_fix_does_not_work():
                     "id": "stuck",
                     "instruction": "the broken one",
                     "check": {"type": "contains", "cmd": "check_x", "expect": "live"},
-                    "on_fail": "fix_x",  # this fix does nothing to check_x
+                    "fix": "fix_x",  # this fix does nothing to check_x
                 },
                 {"id": "never", "instruction": "should not run", "check": {"type": "command_succeeds", "cmd": "c3"}},
             ],
@@ -139,7 +139,7 @@ def test_stops_when_fix_does_not_work():
 
 
 def test_verify_mode_is_read_only_and_does_not_apply_fix():
-    # apply_fixes=False (verify): a red check must NOT run its on_fail. verify
+    # apply_fixes=False (verify): a red check must NOT run its fix. verify
     # never mutates the machine, even when a fix that would work exists.
     pack = build_pack(
         {
@@ -150,7 +150,7 @@ def test_verify_mode_is_read_only_and_does_not_apply_fix():
                     "id": "s",
                     "instruction": "read-only check",
                     "check": {"type": "contains", "cmd": "check_x", "expect": "live"},
-                    "on_fail": "fix_x",
+                    "fix": "fix_x",
                 }
             ],
         }
@@ -164,6 +164,86 @@ def test_verify_mode_is_read_only_and_does_not_apply_fix():
     assert not result.passed
     assert result.stopped_at == "s"
     assert "fix_x" not in ex.calls  # read-only: the fix was never applied
+
+
+# --- fix vs on_fail: runnable command vs human prose ------------------------
+
+
+def test_prose_on_fail_is_never_executed():
+    # A genuinely-human step has on_fail (guidance) but NO fix. remediate must
+    # NOT shell-run the prose at the machine -- it stops with the guidance. This
+    # is the footgun the fix/on_fail split kills: English is not a command.
+    pack = build_pack(
+        {
+            "name": "p",
+            "version": "1",
+            "steps": [
+                {
+                    "id": "human",
+                    "instruction": "needs a person",
+                    "check": {"type": "contains", "cmd": "check_x", "expect": "live"},
+                    "on_fail": "Create a Supabase account, then set DATABASE_URL.",
+                }
+            ],
+        }
+    )
+    ex = FakeExecutor()
+    ex.set("check_x", "not yet", 0)
+
+    result = run_pack(pack, ex)  # remediate mode
+
+    assert not result.passed
+    assert result.stopped_at == "human"
+    # the prose was never run as a command; only the check ran (once)
+    assert ex.calls == ["check_x"]
+
+
+def test_fix_runs_and_on_fail_is_not_run_when_both_present():
+    # A step may carry BOTH: fix (runnable) + on_fail (why, for the failure
+    # message). remediate runs only fix.
+    pack = build_pack(
+        {
+            "name": "p",
+            "version": "1",
+            "steps": [
+                {
+                    "id": "both",
+                    "instruction": "has both",
+                    "check": {"type": "contains", "cmd": "check_x", "expect": "live"},
+                    "fix": "fix_x",
+                    "on_fail": "If the fix didn't take, check your PATH and retry.",
+                }
+            ],
+        }
+    )
+    ex = FakeExecutor()
+    ex.set("check_x", "not yet", 0)
+    ex.when_run_set("fix_x", "check_x", "now live", 0)
+
+    result = run_pack(pack, ex)
+
+    assert result.passed
+    assert result.outcomes[0].status == "remediated"
+    assert "fix_x" in ex.calls
+    assert "If the fix didn't take, check your PATH and retry." not in ex.calls
+
+
+def test_non_string_fix_rejected():
+    with pytest.raises(PackValidationError):
+        build_pack(
+            {
+                "name": "p",
+                "version": "1",
+                "steps": [
+                    {
+                        "id": "a",
+                        "instruction": "x",
+                        "check": {"type": "command_succeeds", "cmd": "c"},
+                        "fix": 123,
+                    }
+                ],
+            }
+        )
 
 
 def test_stops_immediately_without_on_fail():

@@ -36,6 +36,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/obsidian-wiki/files/setup_wiki.py --check
+    fix: python packs/obsidian-wiki/files/setup_wiki.py
     on_fail: >
       No wiki found. Create it (idempotent):
       python packs/obsidian-wiki/files/setup_wiki.py
@@ -47,6 +48,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/obsidian-wiki/files/setup_wiki.py --check-memory-link
+    fix: python packs/obsidian-wiki/files/setup_wiki.py --link-memory
     on_fail: >
       The wiki isn't referenced from memory yet. Link it:
       python packs/obsidian-wiki/files/setup_wiki.py --link-memory

@@ -38,6 +38,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/identity/files/setup_identity.py --check-memory
+    fix: python packs/identity/files/setup_identity.py --link-memory
     on_fail: >
       Identity isn't linked to memory yet. Link it:
       python packs/identity/files/setup_identity.py --link-memory
@@ -50,6 +51,7 @@ steps:
     check:
       type: command_succeeds
       cmd: python packs/identity/files/setup_identity.py --check-wire
+    fix: python packs/identity/files/setup_identity.py --wire
     on_fail: >
       CLAUDE.md doesn't point at your identity yet. Wire it:
       python packs/identity/files/setup_identity.py --wire

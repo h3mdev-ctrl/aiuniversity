@@ -12,15 +12,14 @@ tmp and never touches the real ~/.claude. (The memory/gbrain packs each have one
 genuinely-live step -- a `claude -p` recall probe / a live CLI -- that can't run
 offline; those stay the recipient's one hand-run gate, as documented.)
 
-WHAT "THE GOLDEN PATH" IS HERE. Remediation is AGENT-driven: SKILL.md runs a
-check, and on a red result reads the step's prescribed `on_fail` and runs the
-command inside it. The packs write `on_fail` as human/agent prose (it explains
-*why*, then gives the command), so the headless `python -m runner.cli remediate`
--- which shell-execs `on_fail` verbatim -- can NOT auto-apply it (see
-test_cli_remediate_cannot_auto_apply_prose_on_fail, which pins that). So the true
-end-to-end loop a recipient goes through is: verify (red, names the gap) -> run
-the prescribed command -> verify (green). This exam drives exactly that through
-the real CLI.
+WHAT "THE GOLDEN PATH" IS HERE. Each mechanical step carries a runnable `fix:`
+(the command) kept separate from `on_fail:` (the human "why", shown when the run
+stops). So there are two real end-to-end paths, and this exam drives BOTH through
+the CLI: (1) headless `remediate` auto-applies the `fix:` of each red step and
+reaches PASS on its own; (2) the agent path -- `verify` (red, names the gap) ->
+run the prescribed command -> `verify` (green) -- for when a human is in the loop.
+Genuinely-human steps (an interview, "add to your PATH", a live `claude -p` probe)
+have no `fix:` and correctly stop with their prose instead of self-healing.
 
 Exercises: runner/cli.py + runner/verify.py (escape hatch) + runner/matcher.py +
 packs/guardrails end to end, deterministically and offline.
@@ -121,17 +120,25 @@ def test_verify_is_idempotent_and_read_only_after_setup(tmp_path):
     assert (tmp_path / "settings.json").read_text(encoding="utf-8") == first
 
 
-def test_cli_remediate_cannot_auto_apply_prose_on_fail(tmp_path):
-    """Pins a known limitation so it stays visible. The packs write `on_fail` as
-    agent prose ("Hook file missing. Install it: python ..."), and headless
-    `remediate` shell-execs that verbatim -> it is not a runnable command, so the
-    fix cannot land and the run stops at the first step. Remediation is therefore
-    AGENT-driven (SKILL.md reads on_fail and runs the command), NOT something the
-    bare CLI does. If a future change makes on_fail command-runnable (or adds a
-    dedicated runnable `fix:` field), this test should flip to a full PASS -- and
-    that's the reminder to update it."""
+def test_cli_remediate_auto_applies_the_runnable_fixes_to_pass(tmp_path):
+    """Headless `remediate` now drives the whole runbook to PASS on its own,
+    because every mechanical step carries a runnable `fix:` (the command, kept
+    separate from the human `on_fail` prose). On an empty home the first step is
+    red -> its fix runs -> green; the run reaches PASS with the hook really
+    installed in the throwaway home. This is the deterministic answer key the exam
+    always implied: if we can pose the check, we hand over the fix for the
+    mechanical parts. (Genuinely-human steps -- interviews, PATH, live probes --
+    have no fix and still stop with their prose, by design.)"""
     proc, payload = _cli("remediate", GUARDRAILS, tmp_path)
+
     assert payload["mode"] == "remediate"
-    assert payload["passed"] is False, payload
-    assert payload["stopped_at"] == "hook-installed", payload
-    assert proc.returncode == 1
+    assert payload["passed"] is True, payload
+    assert proc.returncode == 0
+    assert payload["stopped_at"] is None
+    statuses = {o["step_id"]: o["status"] for o in payload["outcomes"]}
+    assert set(statuses) == set(STEPS), statuses
+    for step in STEPS:
+        assert statuses[step] in ("pass", "remediated"), (step, statuses)
+    # empty home -> the first step was red -> its runnable fix landed it
+    assert statuses["hook-installed"] == "remediated", statuses
+    assert (tmp_path / "hooks" / "credential_guard.py").exists()
