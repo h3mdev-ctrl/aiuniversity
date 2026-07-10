@@ -128,14 +128,60 @@ away from Anthropic.** The deep-extract does NOT have to run locally in
 principle, and it does NOT require codex -- but in practice, right now, it
 does require an Anthropic API key and its associated spend.
 
+## Run these once before your first dream (missing setup steps)
+
+gbrain has setup steps that are NOT run automatically on install. Skip them
+and dream runs silently -- no errors, but nothing useful happens because the
+structural data the cycle depends on doesn't exist yet.
+
+```bash
+gbrain extract links --source db      # entity links (free, no LLM, ~minutes on large brains)
+gbrain extract timeline --source db   # timeline coverage (free, no LLM)
+gbrain onboard --check                # shows everything still missing
+```
+
+Run `gbrain onboard --check` first -- it lists what's outstanding. The link +
+timeline steps are free (no model call), idempotent, and safe to re-run. Without
+them, `propose_takes` has nothing to propose and all dream phases show zero
+coverage.
+
+## Getting a local model to work for chat (the alias trick)
+
+gbrain only whitelists specific model IDs for the `openai:` provider (e.g.
+`gpt-4o-mini`). `openai:gemma-4:something` gets rejected. `ollama:model` has no
+chat touchpoint and silently does nothing.
+
+The working path, when `OPENAI_BASE_URL=http://localhost:11434/v1` is set
+(automatically true if you followed the embedding setup):
+
+```bash
+# alias your local model under the whitelisted name
+ollama cp "hf.co/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M" gpt-4o-mini
+```
+
+Then set `chat_model: openai:gpt-4o-mini` in config. Because `OPENAI_BASE_URL`
+points at Ollama, the call goes to your local Gemma -- for free. `gbrain think`
+and query expansion both work this way.
+
+Validate: `gbrain providers test --touchpoint chat` -- should return a real
+response, not an API error.
+
+**File-plane config fields** can't be set via `gbrain config set` -- it rejects
+them with "file-plane field that sizes the schema." Edit `~/.gbrain/config.json`
+directly for:
+
+- `embedding_model` -- which model powers embeddings
+- `embedding_dimensions` -- must match the model's actual output size
+- `takes.bootstrap_enabled` -- must be `true` before `gbrain takes extract` will run
+
 ## Two Windows gotchas that cost an hour each
 
 1. **Use the `openai:` provider prefix, NOT `ollama:`, for the chat model.**
    gbrain's native `ollama` recipe is embed-only (its chat column is blank). The
-   `openai` recipe is already pointed at your local Ollama (localhost:11434/v1)
-   from the embedding setup, so `openai:<local-model>` routes chat to Ollama,
-   while `ollama:<model>` silently does nothing for chat. Validate with
-   `gbrain providers test --touchpoint chat`.
+   `openai` recipe routes to your local Ollama if `OPENAI_BASE_URL` is set to
+   `http://localhost:11434/v1` (set automatically by the embedding setup), so
+   `openai:<alias>` routes chat to Ollama, while `ollama:<model>` silently does
+   nothing for chat. Validate with `gbrain providers test --touchpoint chat`.
 
 2. **Route the nightly job's native output through cmd.exe, not PowerShell
    `2>&1`.** On Windows, redirecting a native command's stderr with PowerShell
