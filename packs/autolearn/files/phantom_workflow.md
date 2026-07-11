@@ -19,17 +19,86 @@ tool never writes memory unattended.
 `should_write: false` than to file noise. Every filed lesson lives in the
 always-loaded MEMORY.md scan forever, so noise dilutes the whole system.
 
+## Core principles (apply throughout every stage below)
+
+These are the growth axioms. Check every decision in stages 1–6 against them.
+
+### 1. Bidirectional — codify success as aggressively as failure
+
+Corrections are loud; confirmations are quiet. If autolearn only records "what to
+avoid", you produce a version of Claude that shrinks — avoiding past mistakes but
+drifting away from validated approaches, growing overly cautious. Save both and you
+compound.
+
+- **Failure signals** — user corrections, quirky failures that took ≥2 tries, rules
+  the model already had but ignored
+- **Success signals** — user confirmations of non-obvious choices ("yes exactly",
+  "that was the right call"), clean first-shot ships, correct escalation calls,
+  approaches that worked cleanly the first time
+
+If a scan yields ONLY failures, question that — usually a listening failure, not a
+real absence of wins.
+
+### 2. Write generously to cold storage; be ruthless about hot promotion
+
+The memory system is tiered:
+
+- **Tier 1 (`MEMORY.md`)** — always loaded, capped ~180 lines, routing rows only
+- **Tier 2 (`INDEX_*.md`)** — fetched on demand
+- **Tier 3 (individual memory files + `CATALOG.md`)** — searchable, not auto-loaded
+
+**Writing to Tier 3 is nearly free.** The bloat problem isn't total memory volume —
+it's Tier 1 pollution. So: err on the side of writing the lesson to a Tier 3 file;
+be stingy about promoting a resolver row to Tier 1 (`MEMORY.md`). Promotion is
+earned by evidence a rule fires on multiple future sessions in load-bearing moments,
+not by first-write optimism.
+
+### 3. Deterministic verification beats model self-judgment
+
+A weak model judging its own work hallucinates confidently. Prefer executable checks
+(`memory_gate.py`, `memory_doctor.py`, the `--validate` dry-run) over "I feel
+confident this passes." If you're about to CLAIM a lesson is safe or a slug is
+unique, run the check. The rest of aiuniversity applies this pattern — every pack
+step has a `check` that runs code, not vibes. Autolearn should too.
+
+### 4. Retirement is TYPE-AWARE — never time-prune principles
+
+Frequency of firing is the wrong retirement variable. Zero hits often means the rule
+is **working** (successful non-need), not that it's stale. The right question is:
+_if this rule vanished tomorrow, would the next occurrence of its trigger go badly?_
+
+| Memory type                                    | Retirement rule                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `feedback_*` (behavioural principles)          | **Never time-prune.** Retire only if a new lesson explicitly contradicts. Quiet ≠ obsolete. |
+| `reference_*` (facts about how systems behave) | Retire only if the underlying reality changes. Untouched ≠ wrong.                           |
+| `project_*` (current state, in-flight work)    | Time-cap appropriate. Convert to historical or retire once state resolves.                  |
+| `user_*` (facts about the operator)            | **Never prune.** Foundation.                                                                |
+
+The only pruning discipline that applies uniformly is _consolidation_ (merge 3+
+files on the same topic; extract principle from incident logs) — never _deletion_
+on the basis of quiet-ness alone.
+
+### Workflow implication: writes at boundaries, never mid-flow
+
+"Autolearn unprompted" does NOT mean interrupting live work to write files.
+Observations get flagged in-context during a turn; the actual write is a cheap
+append to the queue at the end of the turn (commit, Stop, or session close); the
+queue gets processed at the next drain. Zero mid-turn disruption — all growth cost
+is deferred to natural pause points.
+
 ## The 6 stages
 
 ### 1. Observe -- what to actually look at
 
 Read three things:
+
 - **The commit subject + body** -- what did we intend?
 - **The `--stat` diff summary** -- what actually changed, at a glance.
 - **The queue context** -- was this the tail of a struggle (2+ commits fixing the
   same thing), or a one-off?
 
 **Stop here (write nothing) when:**
+
 - Pure formatting, whitespace, or typo fixes.
 - Revert commits.
 - Merge commits with no manual edits.
@@ -39,9 +108,10 @@ Read three things:
 ### 2. Critique -- what surprised us?
 
 Ask:
+
 - What did we CORRECT in this commit? (bug fixes are the richest source of lessons)
 - What almost tripped a future Claude that this commit avoids?
-- Is there a rule in this fix that would apply to *other* situations, not just
+- Is there a rule in this fix that would apply to _other_ situations, not just
   this one? (If yes, that's a durable rule.)
 
 If you can't answer these, `should_write: false` is the honest answer.
@@ -62,6 +132,7 @@ The JSON shape:
 ```
 
 Rules of thumb:
+
 - **type**: `feedback` for behaviour rules ("do X" / "avoid Y"); `reference` for
   where-answers-live ("this pattern lives here").
 - **description AND resolver_intent** phrase the TRIGGER -- the moment the lesson
@@ -80,21 +151,23 @@ deterministic checks. You need no local model for any of this.
 
 **Layer 1 -- deterministic gates (automatic, pure code).** `--write-learning`
 runs these for you and REFUSES the write on any HARD failure:
+
 - credential/secret scan (won't let a key from a diff land in memory),
 - size bound (body <= 40 lines -- distil to the rule),
 - duplicate slug (a memory by that name exists -> update by hand, don't overwrite),
 - balanced code fences + required fields.
-You can dry-run them: `... --validate` (same JSON on stdin, writes nothing).
+  You can dry-run them: `... --validate` (same JSON on stdin, writes nothing).
 
 **Layer 2 -- your semantic judgment (you have the context; a judge model does not).**
 This is the part only the reflecting Claude can do well, because you were in the
 session. Ask:
+
 - **Is this a RULE or an EPISODE?** Rules ("in situation Y, always X") are durable;
   episodes ("we did X once") are not.
 - **Would a fresh Claude actually hit the trigger?** Impossibly narrow -> dark on
   arrival.
 - **Near-duplicate of an existing memory?** Prefer UPDATING it (`should_write:
-  false`, edit by hand) over adding a rival.
+false`, edit by hand) over adding a rival.
 
 If any Layer-2 answer is no, set `should_write: false`. That is a real answer.
 
@@ -145,7 +218,7 @@ great for "I just learned this, file it now."
 
 For the **unattended** path (`--drain`, run headless on a cadence), we model a more
 capable design borrowed from a mature, proven system (Andrew's `global-evolution`
-drain). Instead of only ever *creating*, the drain reflects over the WHOLE queue at
+drain). Instead of only ever _creating_, the drain reflects over the WHOLE queue at
 once, is shown the EXISTING memory (routing index + every slug), and returns a
 **plan of actions**:
 
@@ -195,16 +268,20 @@ PATH, etc.).
 **Stat:** setup_memory.py + memory_doctor.py + tests updated.
 
 **Reflection:**
+
 - **Observe:** discovery used sorted-glob; silently picked one on ambiguity.
-- **Critique:** the rule is broader than memory -- *any* tool that finds >1
+- **Critique:** the rule is broader than memory -- _any_ tool that finds >1
   candidate should refuse to guess.
 - **Generate:**
   ```json
-  {"should_write": true, "type": "feedback",
-   "name": "fail-loud-on-ambiguity",
-   "description": "when you're about to auto-resolve a lookup that has more than one plausible match",
-   "body": "If a tool finds >1 candidate, refuse to guess -- list every candidate and require an explicit pin (env var, argument). **Why:** silent guessing on ambiguity produces false-positive 'it's fine' verdicts against the wrong data. **How to apply:** on len(candidates)>1, print all, exit non-zero, and name the exact pin mechanism.",
-   "resolver_intent": "when you're about to auto-resolve a lookup with more than one candidate"}
+  {
+    "should_write": true,
+    "type": "feedback",
+    "name": "fail-loud-on-ambiguity",
+    "description": "when you're about to auto-resolve a lookup that has more than one plausible match",
+    "body": "If a tool finds >1 candidate, refuse to guess -- list every candidate and require an explicit pin (env var, argument). **Why:** silent guessing on ambiguity produces false-positive 'it's fine' verdicts against the wrong data. **How to apply:** on len(candidates)>1, print all, exit non-zero, and name the exact pin mechanism.",
+    "resolver_intent": "when you're about to auto-resolve a lookup with more than one candidate"
+  }
   ```
 - **Validate:** durable rule ✓; trigger fires on any lookup, not just memory ✓;
   no near-duplicate ✓ -> write.
@@ -215,6 +292,7 @@ PATH, etc.).
 **Stat:** README.md.
 
 **Reflection:**
+
 - **Observe:** a real guardrail fired on the commit message itself when a shell
   command echoed a credential pattern literally.
 - **Critique:** the rule is "when writing shell prose (echo/commit/here-doc)
@@ -222,11 +300,14 @@ PATH, etc.).
   trip -- phrase around it or bypass explicitly."
 - **Generate:**
   ```json
-  {"should_write": true, "type": "reference",
-   "name": "credential-guard-trigger-in-prose",
-   "description": "when you're about to write a shell command whose text would literally name a credential file pattern",
-   "body": "PreToolUse credential guards match the literal text of Bash commands -- including echo/here-doc/commit-message text that only *mentions* a pattern. Phrase around it (say 'dot-env variants' instead of the literal name), or set CLAUDE_CRED_GUARD=off explicitly for that one call.",
-   "resolver_intent": "when writing shell prose that would literally name credential file patterns"}
+  {
+    "should_write": true,
+    "type": "reference",
+    "name": "credential-guard-trigger-in-prose",
+    "description": "when you're about to write a shell command whose text would literally name a credential file pattern",
+    "body": "PreToolUse credential guards match the literal text of Bash commands -- including echo/here-doc/commit-message text that only *mentions* a pattern. Phrase around it (say 'dot-env variants' instead of the literal name), or set CLAUDE_CRED_GUARD=off explicitly for that one call.",
+    "resolver_intent": "when writing shell prose that would literally name credential file patterns"
+  }
   ```
 - **Validate:** durable ✓; recurring trigger (any doc/commit describing a
   guard) ✓ -> write.
@@ -237,6 +318,7 @@ PATH, etc.).
 **Stat:** VERSION file, one line.
 
 **Reflection:**
+
 - **Observe:** version bump, no code change.
 - **Critique:** no rule embedded here.
 - `{"should_write": false}` -- honest and correct. Nothing to file.
@@ -247,6 +329,7 @@ PATH, etc.).
 **Stat:** one comment line.
 
 **Reflection:**
+
 - **Observe:** docstring typo.
 - **Critique:** "check docstrings for typos" is a rule, but it's near-universal,
   never triggered by a specific moment -- a memory nothing routes to.

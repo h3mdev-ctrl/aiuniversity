@@ -1,0 +1,56 @@
+# wrap-up -- session close-out skill: ship gate + deploy gate + autolearn.
+#
+# The end-of-session workflow that runs BOTH the shipping pipeline AND the
+# self-improvement pipeline as a single mandatory sequence. Fires when the user
+# says "wrap up", "wrap it up", "close out", or invokes /wrap-up directly.
+#
+# GSTACK-OPTIONAL. The ship gate has two paths:
+#   Path A -- gstack installed: uses /ship + /land-and-deploy as a sequential pair
+#   Path B -- no gstack: documented hand-rolled fallback (git test/diff/commit/push,
+#            and if PR workflow, wait for merge + deploy before declaring done)
+#
+# Both paths enforce the same checkpoints. This pack works standalone; gstack just
+# makes Part 1 richer. Recipients who prefer their own shipping workflow can adapt
+# Path B to match theirs -- the skill documents the checkpoints, not the tool.
+#
+# COMPANION: the autolearn pack. wrap-up's Part 2 references autolearn's
+# phantom_workflow.md for the bidirectional/tiered/type-aware autolearn principles.
+# The skill works without autolearn (Part 2 falls back to a summary), but installing
+# both is strongly recommended -- autolearn is where the real durability comes from.
+#
+# Commands run from the repo root.
+name: wrap-up
+version: 0.1.0
+steps:
+  - id: skill-installed
+    instruction: >
+      Install the /wrap-up skill at ~/.claude/skills/wrap-up/SKILL.md. This is what
+      Claude Code loads when the user says "wrap up" -- the 6-stage phantom
+      close-out procedure with ship gate, deploy gate, and autolearn scan.
+    check:
+      type: command_succeeds
+      cmd: python packs/wrap-up/files/setup_wrap_up.py --check
+    fix: python packs/wrap-up/files/setup_wrap_up.py --install
+    on_fail: >
+      Skill file missing. Install it (idempotent):
+        python packs/wrap-up/files/setup_wrap_up.py --install
+
+  - id: autolearn-companion
+    instruction: >
+      RECOMMENDED (not required): install the autolearn pack alongside wrap-up. The
+      wrap-up skill's Part 2 references autolearn's phantom_workflow.md for its
+      bidirectional (success + failure), tiered (Tier 3 generous, Tier 1 stingy),
+      deterministic-first, type-aware retirement principles. Without autolearn the
+      Part 2 scan still runs but falls back to a summary in the SKILL.md itself.
+
+      This step is INFORMATIONAL -- it will report if autolearn is not installed but
+      will not block the wrap-up install. To make wrap-up a strict dependency on
+      autolearn, add autolearn to your pack sequence FIRST.
+    check:
+      type: command_succeeds
+      cmd: python packs/wrap-up/files/setup_wrap_up.py --check-autolearn
+    on_fail: >
+      Autolearn pack workflow guide not found. This is a soft warning -- wrap-up
+      still works. To install the recommended companion:
+        packs/autolearn -- captures every commit + drains lessons into memory
+      Add it to your pack sequence for the full self-improvement loop.
