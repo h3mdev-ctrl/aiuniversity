@@ -1,0 +1,85 @@
+# hooks -- opt-in behavioural guards that catch mistakes by CODE, not by hoping.
+#
+# guardrails (foundation layer-3) installs the mandatory baseline: credential_guard
+# blocks Claude from reading .env / private keys. This pack surfaces the opt-in
+# hooks that ship alongside it -- things you might want once you've seen the
+# baseline working. Each step is self-contained: install + prove it fires.
+#
+# These are NOT required for Claude to function. They're levers you pull when a
+# soft principle in your CLAUDE.md constitution keeps getting ignored and you want
+# a hard backstop that fires at the moment of the tool call.
+#
+# Run guardrails first (foundation layer-3 does this).
+# Then install whichever hooks fit your workflow.
+name: hooks
+version: 0.1.0
+steps:
+  - id: recon-before-build
+    instruction: >
+      Recon-before-build guard: fires when Claude's first Write in a session would
+      create a NEW source file (.py, .ts, .js, .go, .rs, .rb ...) in a repo that
+      already has code. It exits non-zero with a nudge to read the neighbouring
+      code before building a parallel version of it -- the most common way Claude
+      re-derives logic that already exists 40 lines away.
+
+      The soft version ships in the foundation constitution ("Recon before build").
+      Install this hard hook when the soft principle keeps getting skipped and you
+      want it to fire at the moment of the Write, not just as a guideline.
+
+      Installs: ~/.claude/hooks/recon_before_build_guard.py  +
+                PreToolUse(Write) entry in ~/.claude/settings.json.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_recon_build_guard.py --check-hook-file
+    fix: python packs/guardrails/files/setup_recon_build_guard.py
+    on_fail: >
+      Hook file missing. Install it (idempotent):
+        python packs/guardrails/files/setup_recon_build_guard.py
+      Then verify it fires:
+        python packs/guardrails/files/setup_recon_build_guard.py --test-blocking
+
+  - id: recon-before-build-fires
+    instruction: >
+      Prove the recon guard actually fires -- pipe a simulated first-Write-of-a-new-
+      file through the installed hook and confirm it exits non-zero with a BLOCKED
+      message. Also confirm that overwriting an existing file still passes (so it's
+      a real gate, not a wall).
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_recon_build_guard.py --test-blocking
+    on_fail: >
+      The recon guard didn't block a known-forbidden action. Reinstall:
+        python packs/guardrails/files/setup_recon_build_guard.py
+
+  - id: session-end
+    instruction: >
+      Session-end guard: a Stop hook that fires whenever Claude's response contains
+      phrases like "good night", "get some rest", or "want to wrap up?" -- and exits
+      non-zero to flag it. Stops Claude from pre-empting the user's decision about
+      when to stop.
+
+      The soft version ships in the constitution ("Don't tell the user when to stop").
+      Install this when the soft principle keeps getting ignored and you want the
+      Stop hook to catch it.
+
+      Installs: ~/.claude/hooks/session_end_guard.py  +
+                Stop entry in ~/.claude/settings.json.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_session_guard.py --check-hook-file
+    fix: python packs/guardrails/files/setup_session_guard.py
+    on_fail: >
+      Hook file missing. Install it (idempotent):
+        python packs/guardrails/files/setup_session_guard.py
+
+  - id: session-end-fires
+    instruction: >
+      Prove the session-end guard actually fires -- pipe a response containing a
+      session-end phrase through the hook and confirm it exits non-zero. Also
+      confirm a normal response still passes.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_session_guard.py --test-blocking
+    on_fail: >
+      The session-end guard didn't block a known phrase. Reinstall:
+        python packs/guardrails/files/setup_session_guard.py
