@@ -1,0 +1,56 @@
+# audit -- three hooks for observability, notification, and rollback safety.
+#
+# 1. tool_audit_log: PostToolUse (all tools) -- appends every tool call to
+#    ~/.claude/audit.jsonl with timestamp, tool name, file path or command,
+#    and exit code. Append-only, never fails loudly. Answers "what did the
+#    overnight autonomous session actually touch?"
+#
+# 2. notify_discord: Notification hook -- when Claude pauses waiting for input,
+#    POSTs to a Discord webhook. Requires CLAUDE_DISCORD_NOTIFY_URL env var.
+#    Uses User-Agent: curl/8.7.1 (Discord CDN blocks Python's default UA).
+#    No-ops silently if env var not set, so safe to install everywhere.
+#
+# 3. auto_commit_wip: Stop hook -- after each Claude turn, if there are
+#    uncommitted changes, stages everything and commits "wip: claude turn [skip ci]".
+#    Guards: only fires on non-main/master/production/staging branches. Gives
+#    a rollback point after every turn in long autonomous sessions.
+#    Set AUTO_COMMIT_WIP=0 to skip for a turn.
+#    Set AUTO_COMMIT_BRANCH_PATTERN to customise which branches are eligible.
+name: audit
+version: 0.1.0
+steps:
+  - id: hooks-installed
+    instruction: >
+      Install three audit/observability hook scripts at ~/.claude/hooks/:
+        tool_audit_log.py  -- JSONL ledger of every tool call
+        notify_discord.py  -- Discord ping when Claude waits for input
+        auto_commit_wip.py -- WIP commit after each turn (non-main branches only)
+    check:
+      type: command_succeeds
+      cmd: python packs/audit/files/setup_audit.py --check-hook-files
+    fix: python packs/audit/files/setup_audit.py
+
+  - id: registered-in-settings
+    instruction: >
+      Register all three hooks in ~/.claude/settings.json:
+        tool_audit_log -> PostToolUse (all tools)
+        notify_discord -> Notification (no matcher)
+        auto_commit_wip -> Stop (no matcher)
+
+      After installing: set CLAUDE_DISCORD_NOTIFY_URL in your ~/.claude/settings.json
+      env section or shell profile to enable Discord notifications.
+    check:
+      type: command_succeeds
+      cmd: python packs/audit/files/setup_audit.py --check-registered
+    fix: python packs/audit/files/setup_audit.py
+
+  - id: hooks-behave
+    instruction: >
+      Verify: tool_audit_log writes a JSONL entry on a test payload;
+      auto_commit_wip no-ops gracefully outside a git repo.
+    check:
+      type: command_succeeds
+      cmd: python packs/audit/files/setup_audit.py --test-blocking
+    on_fail: >
+      A hook errored. Reinstall:
+        python packs/audit/files/setup_audit.py
