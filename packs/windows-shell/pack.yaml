@@ -1,0 +1,79 @@
+# windows-shell -- harden a Windows dev shell so Python/PowerShell tooling doesn't
+# silently misfire.
+#
+# Grounded in real, dated scars from a heavy Windows user (butler bot, a solar
+# morning-brief, a council-grounds scraper) -- NOT hypotheticals. Each is a trap
+# that makes setup LOOK fine while quietly breaking, with an error that never
+# names the real cause:
+#   - Python defaults to a legacy ANSI code page on Windows -> mojibake + UnicodeDecodeError
+#   - Python 3.14 can't verify HTTPS certs on Win11 -> every requests/urllib call dies
+#   - PowerShell 5.1 reads a BOM-less .ps1 as ANSI -> silently skips blocks, exit 0, no error
+#
+# Every check runs a REAL executable (python / pwsh) so it works under cmd.exe --
+# the shell the runner uses on Windows -- not just bash. Detect-and-advise: these
+# are environment facts, so a check reports the state and the on_fail hands over
+# the exact, proven workaround.
+#
+# Two more traps have no clean universal check (they depend on files this pack
+# can't assume exist) -- they're documented, not gated: the Claude Code plugin
+# ${CLAUDE_PLUGIN_ROOT} cwd bug, and the 260-char MAX_PATH limit. See
+# files/windows_gotchas.md for both, plus the write-a-config-without-a-BOM helper.
+name: windows-shell
+version: 0.1.0
+steps:
+  - id: python-utf8
+    instruction: >
+      Make Python default to UTF-8 for stdio and file I/O. On Windows, Python
+      otherwise uses the legacy ANSI code page (cp1252), which mojibakes non-ASCII
+      text and throws UnicodeDecodeError when reading perfectly good UTF-8 files.
+    check:
+      type: contains
+      cmd: |
+        python -c "import sys; print(sys.stdout.encoding)"
+      expect: utf-8
+    on_fail: >
+      Python is not in UTF-8 mode -- its stdout encoding came back as something like
+      cp1252, so non-ASCII output will mojibake and reading UTF-8 files can crash.
+      Turn on UTF-8 mode permanently: `setx PYTHONUTF8 1`, then open a NEW terminal
+      (setx only affects future shells) and re-run the check. Confirm with
+      `python -c "import sys; print(sys.stdout.encoding)"` -> it should print utf-8.
+
+  - id: python-https
+    instruction: >
+      Confirm Python can actually make an HTTPS request. Python 3.14 on Windows 11
+      can fail certificate verification even when the network is completely fine --
+      so a script that hits any API dies on the first outbound call.
+    check:
+      type: command_succeeds
+      cmd: |
+        python -c "import urllib.request; urllib.request.urlopen('https://pypi.org/simple/', timeout=20)"
+    on_fail: >
+      Python can't verify HTTPS certificates (SSLCertVerificationError:
+      CERTIFICATE_VERIFY_FAILED). This is a known Python-3.14-on-Windows trap. Do
+      NOT waste time on `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, or `curl` -- none of
+      them fix it here. Two things that DO work: (1) route HTTPS through PowerShell
+      instead -- `Invoke-RestMethod` for JSON, .NET `HttpClient` for multipart
+      uploads (see files/windows_gotchas.md for copy-paste patterns); (2) if you
+      control the interpreter, downgrade to Python 3.12/3.13, which verify fine.
+      (Separate but related: paths over 260 chars silently break Python's open() on
+      Windows -- keep working paths short. See files/windows_gotchas.md.)
+
+  - id: powershell-utf8-safe
+    instruction: >
+      Confirm a UTF-8-safe PowerShell (PowerShell 7, the `pwsh` command) is
+      available. Windows PowerShell 5.1 reads a BOM-less .ps1 as ANSI, so a script
+      with any non-ASCII character (em-dash, curly quote, arrow) can have whole
+      blocks SILENTLY skipped -- exit 0, empty stderr, "runs but does nothing."
+    check:
+      type: command_succeeds
+      cmd: pwsh -NoProfile -Command "exit 0"
+    on_fail: >
+      `pwsh` (PowerShell 7) isn't installed, so you're relying on Windows PowerShell
+      5.1 -- the one that mangles BOM-less .ps1 files with non-ASCII bytes and skips
+      blocks with no error (a `foreach` that just never runs). Pick one: (a) keep all
+      .ps1 files PURE ASCII -- plain hyphens `-` not em-dashes, straight quotes not
+      curly; (b) save .ps1 files as UTF-8 WITH a BOM so 5.1 reads them correctly; or
+      (c) install PowerShell 7, which defaults to UTF-8: `winget install --id
+      Microsoft.PowerShell`, then re-run the check. Fast diagnosis if a script
+      mysteriously no-ops: scan it for bytes > 127 FIRST --
+      `$b=[IO.File]::ReadAllBytes($f); ($b | ? {$_ -gt 127}).Count` should be 0.
