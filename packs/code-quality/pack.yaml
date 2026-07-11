@@ -9,9 +9,11 @@
 #
 # 2. stop_verify: Stop hook -- before Claude can declare "done", runs the
 #    project test suite and type checker. Blocks (exit 2) if they fail.
-#    Detects project type from CWD: pytest, npm test/typecheck, go test, cargo test.
-#    Uses a per-session sentinel so it only runs once per directory per session.
-#    Set STOP_VERIFY_SKIP=1 to bypass for a turn (e.g. mid-refactor).
+#    OPT-IN per project: only runs if .stop_verify exists in the repo root,
+#    OR if STOP_VERIFY=1 is set. Silently skips everywhere else so it doesn't
+#    time out on large test suites in projects you haven't opted in.
+#    To enable: touch .stop_verify in the project root.
+#    Set STOP_VERIFY_SKIP=1 to bypass for a single turn.
 #
 # These close the "Claude says it's done but tests are red" failure mode.
 name: code-quality

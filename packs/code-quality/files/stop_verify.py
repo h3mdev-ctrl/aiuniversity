@@ -12,12 +12,13 @@ Detect project type from the CWD (or STOP_VERIFY_DIR env var to override):
   go.mod                               -> go test ./...
   Cargo.toml                           -> cargo test --quiet
 
-Skips silently if no project type is detected. Runs at most once per directory
-per session (sentinel at /tmp/stop_verify_<hash>.done so repeated Stop calls
-in the same session are fast).
+OPT-IN per project: only runs if a .stop_verify file exists in the repo root,
+OR if STOP_VERIFY=1 env var is set. This prevents the full test suite from
+running in every repo on every Stop.
 
-Set STOP_VERIFY_SKIP=1 to bypass for a single turn (e.g. if you're mid-refactor
-and know tests are intentionally broken).
+To enable for a project: touch .stop_verify (add to .gitignore if personal).
+To enable globally: set STOP_VERIFY=1 in ~/.claude/settings.json env section.
+Set STOP_VERIFY_SKIP=1 to bypass for a single turn (e.g. mid-refactor).
 """
 import hashlib
 import json
@@ -51,11 +52,29 @@ def _pkg_has_script(pkg: dict, name: str) -> bool:
     return name in (pkg.get("scripts") or {})
 
 
-def main() -> int:
+def _is_enabled(cwd: str) -> bool:
     if os.environ.get("STOP_VERIFY_SKIP") == "1":
+        return False
+    if os.environ.get("STOP_VERIFY") == "1":
+        return True
+    # Per-project opt-in: touch .stop_verify in the repo root
+    root = cwd
+    for _ in range(4):  # walk up to 4 levels looking for .stop_verify or .git
+        if (pathlib.Path(root) / ".stop_verify").exists():
+            return True
+        parent = str(pathlib.Path(root).parent)
+        if parent == root:
+            break
+        root = parent
+    return False
+
+
+def main() -> int:
+    cwd = os.environ.get("STOP_VERIFY_DIR") or os.getcwd()
+
+    if not _is_enabled(cwd):
         return 0
 
-    cwd = os.environ.get("STOP_VERIFY_DIR") or os.getcwd()
     sentinel = _sentinel(cwd)
     if sentinel.exists():
         return 0  # already verified this session
