@@ -53,11 +53,24 @@ steps:
       and proves it fires by piping a forbidden probe through it.
     module: guardrails
 
-  - id: layer-4-capabilities
+  - id: layer-4-capabilities-note
     instruction: >
-      Your capabilities: the tools Claude can actually use. This runs the gbrain
-      module end to end -- install it, connect it, and prove it is live.
-    module: gbrain-windows
+      Capabilities (gbrain): the foundation is complete without gbrain, but most
+      setups include it -- it gives Claude a persistent, searchable knowledge brain
+      that compounds across sessions and is the memory backend for several other
+      packs. If you have gbrain installed (or plan to), run the gbrain pack now as
+      a follow-on:
+
+        python -m runner.cli remediate packs/gbrain-windows
+
+      Skip this if you are not using gbrain. It is not required for the foundation
+      to function.
+    check:
+      type: command_succeeds
+      cmd: python -c "import shutil; exit(0 if shutil.which('gbrain') else 0)"
+    on_fail: >
+      gbrain is not on your PATH. That is fine -- foundation is complete without it.
+      When you are ready, run: python -m runner.cli remediate packs/gbrain-windows
 
   - id: layer-5-durability
     instruction: >
