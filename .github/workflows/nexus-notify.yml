@@ -38,6 +38,21 @@ jobs:
           token: ${{ secrets.NEXUS_PAT }}
           path: nexus
 
+      # On a PR synchronize the payload carries no commit message (only before/after
+      # SHAs), and the PR *title* is stale — it describes the PR, not the new commits.
+      # Fetch the head commit's subject so the nexus/Discord line summarises what
+      # actually LANDED, in plain English. Uses the default repo-scoped GITHUB_TOKEN.
+      - name: Resolve head commit subject (PR synchronize only)
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          subj=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.message' | head -1)
+          echo "SYNC_SUBJECT=$subj" >> "$GITHUB_ENV"
+          echo "resolved head subject: $subj"
+
       - name: Compose + append event
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -48,6 +63,7 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_SENDER: ${{ github.event.sender.login }}
+          SYNC_SUBJECT: ${{ env.SYNC_SUBJECT }}
           PUSH_SHA: ${{ github.event.after }}
           PUSH_COMPARE: ${{ github.event.compare }}
           PUSH_ACTOR: ${{ github.event.pusher.name }}
@@ -87,10 +103,13 @@ jobs:
                   type_ = "note"
                   body = f"[{repo}] PR #{pr_num} marked ready for review by @{author}: {pr_title}"
               elif action == "synchronize":
-                  # New commits pushed onto an open PR — WIP progress. The pusher
-                  # (sender) may differ from the PR author, so attribute to sender.
+                  # New commits pushed onto an open PR — WIP progress. Summarise what
+                  # LANDED via the head commit's subject (the PR title is stale); fall
+                  # back to the PR title if the subject fetch returned nothing. The
+                  # pusher (sender) may differ from the PR author, so attribute sender.
                   type_ = "note"
-                  body = f"[{repo}] PR #{pr_num} updated (new commits) by @{sender}: {pr_title}"
+                  landed = (os.environ.get("SYNC_SUBJECT", "").strip() or pr_title)[:400]
+                  body = f"[{repo}] PR #{pr_num} updated by @{sender}: {landed}"
               else:
                   print(f"skipping unrecognised PR action: {action}")
                   raise SystemExit(0)
