@@ -1,0 +1,196 @@
+name: nexus-notify
+
+# Route aiuniversity events (PR opened, updated, closed/merged, push to main) through
+# the nexus collaboration log so both agents (Andrew's Claude, Jason's Claude) see them
+# via the nexus Discord webhook without either machine polling GitHub.
+#
+# `synchronize` is included so WIP commits pushed onto an OPEN PR also notify — more
+# chatter, but visible progress. Drafts stay silent (the draft guard on the job).
+#
+# Requires an aiuniversity repo secret NEXUS_PAT with `contents: write` on
+# h3mdev-ctrl/nexus. See setup instructions at the bottom of this file.
+#
+# The event lands as an entry in nexus log/aiuniversity.jsonl (a distinct bot shard,
+# not an agent shard — clear origin, no muddying of andrew.jsonl / friend.jsonl).
+
+on:
+  pull_request:
+    types: [opened, closed, reopened, ready_for_review, synchronize]
+  push:
+    branches: [main]
+
+concurrency:
+  # Serialise so two events that fire near-simultaneously don't race the git push
+  # against the same nexus main branch. Latency is acceptable; loss is not.
+  group: nexus-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # Skip drafts on PR events — they're not ready for the other agent to see yet.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - name: Checkout nexus
+        uses: actions/checkout@v4
+        with:
+          repository: h3mdev-ctrl/nexus
+          token: ${{ secrets.NEXUS_PAT }}
+          path: nexus
+
+      # On a PR synchronize the payload carries no commit message (only before/after
+      # SHAs), and the PR *title* is stale — it describes the PR, not the new commits.
+      # Fetch the head commit's subject so the nexus/Discord line summarises what
+      # actually LANDED, in plain English. Uses the default repo-scoped GITHUB_TOKEN.
+      - name: Resolve head commit subject (PR synchronize only)
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          subj=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.message' | head -1)
+          echo "SYNC_SUBJECT=$subj" >> "$GITHUB_ENV"
+          echo "resolved head subject: $subj"
+
+      - name: Compose + append event
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_SENDER: ${{ github.event.sender.login }}
+          SYNC_SUBJECT: ${{ env.SYNC_SUBJECT }}
+          PUSH_SHA: ${{ github.event.after }}
+          PUSH_COMPARE: ${{ github.event.compare }}
+          PUSH_ACTOR: ${{ github.event.pusher.name }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python - <<'PYEOF'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          repo = os.environ["REPO_NAME"]
+          ts = datetime.now(timezone.utc).isoformat()
+          event = os.environ["EVENT_NAME"]
+
+          if event == "pull_request":
+              action = os.environ.get("PR_ACTION", "")
+              merged = os.environ.get("PR_MERGED", "false").lower() == "true"
+              pr_num = os.environ.get("PR_NUMBER", "")
+              pr_title = os.environ.get("PR_TITLE", "")[:400]
+              pr_url = os.environ.get("PR_URL", "")
+              author = os.environ.get("PR_AUTHOR", "unknown")
+              sender = os.environ.get("PR_SENDER", "") or author
+
+              if action == "opened" or action == "reopened":
+                  type_ = "note"
+                  verb = "opened" if action == "opened" else "reopened"
+                  body = f"[{repo}] PR #{pr_num} {verb} by @{author}: {pr_title}"
+              elif action == "closed":
+                  if merged:
+                      type_ = "decision"
+                      body = f"[{repo}] PR #{pr_num} MERGED by @{author}: {pr_title}"
+                  else:
+                      type_ = "note"
+                      body = f"[{repo}] PR #{pr_num} closed without merge by @{author}: {pr_title}"
+              elif action == "ready_for_review":
+                  type_ = "note"
+                  body = f"[{repo}] PR #{pr_num} marked ready for review by @{author}: {pr_title}"
+              elif action == "synchronize":
+                  # New commits pushed onto an open PR — WIP progress. Summarise what
+                  # LANDED via the head commit's subject (the PR title is stale); fall
+                  # back to the PR title if the subject fetch returned nothing. The
+                  # pusher (sender) may differ from the PR author, so attribute sender.
+                  type_ = "note"
+                  landed = (os.environ.get("SYNC_SUBJECT", "").strip() or pr_title)[:400]
+                  body = f"[{repo}] PR #{pr_num} updated by @{sender}: {landed}"
+              else:
+                  print(f"skipping unrecognised PR action: {action}")
+                  raise SystemExit(0)
+
+              entry = {
+                  "ts": ts,
+                  "agent": "aiuniversity",
+                  "type": type_,
+                  "id": "T-1",
+                  "body": body,
+                  "url": pr_url,
+              }
+
+          elif event == "push":
+              sha = os.environ.get("PUSH_SHA", "")[:12]
+              actor = os.environ.get("PUSH_ACTOR", "unknown")
+              msg = os.environ.get("COMMIT_MSG", "").split("\n", 1)[0][:200]
+              compare = os.environ.get("PUSH_COMPARE", "")
+
+              entry = {
+                  "ts": ts,
+                  "agent": "aiuniversity",
+                  "type": "note",
+                  "id": "T-1",
+                  "body": f"[{repo}] push to main by @{actor} ({sha}): {msg}",
+                  "url": compare,
+              }
+          else:
+              print(f"skipping unrecognised event: {event}")
+              raise SystemExit(0)
+
+          log = Path("nexus/log/aiuniversity.jsonl")
+          log.parent.mkdir(parents=True, exist_ok=True)
+          with log.open("a", encoding="utf-8") as f:
+              f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+          print(f"appended: {entry['body'][:120]}")
+          PYEOF
+
+      - name: Commit + push to nexus
+        working-directory: nexus
+        run: |
+          git config user.name "aiuniversity-bot"
+          git config user.email "aiuniversity-bot@users.noreply.github.com"
+          git add log/aiuniversity.jsonl
+          if git diff --cached --quiet; then
+            echo "no change staged — skipping commit"
+            exit 0
+          fi
+          git commit -m "aiuniversity: ${{ github.event_name }} event (${{ github.event.action || 'push' }})"
+          # Retry once on race — another concurrent event may have pushed between clone + push
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push failed on attempt $attempt, rebasing + retrying"
+            git pull --rebase
+          done
+          echo "failed after 3 attempts"
+          exit 1
+
+# ----------------------------------------------------------------------------
+# Setup (one-time, on the aiuniversity repo):
+#
+# 1. Generate a fine-grained PAT scoped to h3mdev-ctrl/nexus with permissions:
+#      Contents: Read and write
+#      Metadata: Read-only (default)
+#    Set an expiry (recommend 1 year, calendar reminder to rotate).
+#
+# 2. Add it as a repo secret named NEXUS_PAT:
+#      Settings → Secrets and variables → Actions → New repository secret
+#      Name: NEXUS_PAT
+#      Value: <the PAT from step 1>
+#
+# 3. First run will create nexus/log/aiuniversity.jsonl (a new bot shard) and the
+#    nexus post-commit hook will fire the Discord webhook automatically — Jason's
+#    Claude will see the aiuniversity events in #nexus without any polling.
+#
+# Failure modes to watch for on first run:
+#   - "Bad credentials" → PAT lacks Contents:write, or was scoped to the wrong repo
+#   - Push race error → concurrency:nexus-notify guards this, but if two workflows
+#     race across repos it retries via git pull --rebase (see the loop above)
+#   - Missing log/ directory → the composer step creates it automatically
+# ----------------------------------------------------------------------------

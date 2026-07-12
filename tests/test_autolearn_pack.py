@@ -455,6 +455,8 @@ def test_ships_windows_gotchas_doc():
     assert "task scheduler" in text and "path" in text             # minimal PATH
     assert "2>&1" in text                                           # powershell native stderr
     assert "git init" in text                                       # rollback prerequisite
+    assert "unicodeencodeerror" in text and 'encoding="utf-8"' in text  # cp1252 stdin crash
+    assert "autolearn_drain_batch" in text                         # output-window batch cap
 
 
 def test_pack_header_points_to_windows_gotchas():
@@ -468,3 +470,52 @@ def test_pack_loads_with_four_steps():
     assert [s.id for s in pack.steps] == [
         "memory-present", "workflow-installed", "hook-installed", "autolearn-works",
     ]
+
+
+def test_drain_batches_large_queue_and_keeps_remainder(tmp_path):
+    # Regression: a big queue (36 real commits) overran the model's output window
+    # so the JSON plan came back truncated -> "no usable plan" -> nothing ever drained.
+    # The drain must process at most AUTOLEARN_DRAIN_BATCH entries and KEEP the rest.
+    setup_memory(tmp_path)
+    _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 15)
+    fake = _fake_plan_file(tmp_path, {"actions": [{"type": "skip"}]})
+    r = _drain(tmp_path, fake, AUTOLEARN_DRAIN_BATCH="10")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "processing 10 of 15" in r.stdout
+    q = tmp_path / "autolearn_queue.jsonl"
+    assert q.exists(), "remainder must survive -- queue not deleted wholesale"
+    remaining = [ln for ln in q.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(remaining) == 5, f"expected 5 kept, got {len(remaining)}"
+    # the kept entries are the tail (last 5), not the processed head
+    assert json.loads(remaining[0])["subject"] == "c10"
+
+
+def test_drain_batch_at_or_below_limit_clears_queue(tmp_path):
+    # When the queue fits in one batch, it drains fully and the file is removed.
+    setup_memory(tmp_path)
+    _git_init_memory(tmp_path)
+    _queue_n(tmp_path, 3)
+    fake = _fake_plan_file(tmp_path, {"actions": [{"type": "skip"}]})
+    r = _drain(tmp_path, fake, AUTOLEARN_DRAIN_BATCH="10")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "processing" not in r.stdout  # no partial-batch note when it all fits
+    assert not (tmp_path / "autolearn_queue.jsonl").exists()
+
+
+def test_plan_reflect_subprocess_pins_utf8_encoding():
+    # Regression: the headless `claude -p` call piped the prompt (which contains
+    # MEMORY.md routing arrows, U+2192) on stdin with text=True but NO encoding,
+    # so on Windows the cp1252 codec crashed with UnicodeEncodeError before the
+    # model was ever reached. Every drain died silently. Pin utf-8 on that call.
+    src = SCRIPT.read_text(encoding="utf-8")
+    marker = 'input=prompt'
+    assert marker in src, "the _plan_reflect stdin-pipe call moved -- update this guard"
+    # the subprocess.run that feeds the prompt on stdin MUST declare encoding
+    call_start = src.rfind("subprocess.run", 0, src.index(marker))
+    call_end = src.index(")", src.index(marker))
+    call = src[call_start:call_end]
+    assert 'encoding="utf-8"' in call, (
+        "the claude -p stdin pipe must set encoding='utf-8' or it crashes on "
+        "non-cp1252 chars (U+2192 arrows) on Windows"
+    )

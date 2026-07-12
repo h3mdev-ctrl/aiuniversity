@@ -553,7 +553,7 @@ def _plan_reflect(entries: "list[dict]", mem: pathlib.Path, model: str) -> "dict
     # Python applies the validated plan. That model/filesystem boundary is the
     # safety line. Prompt goes on STDIN (a .cmd would mangle it as an argv string).
     r = subprocess.run(
-        [exe, "-p", "--model", model, "--tools", ""], input=prompt, capture_output=True, text=True
+        [exe, "-p", "--model", model, "--tools", ""], input=prompt, capture_output=True, text=True, encoding="utf-8"
     )
     if r.returncode != 0:
         return None
@@ -812,8 +812,14 @@ def drain() -> int:
     if not entries:
         print("queue empty -- nothing to drain")
         return 0
+    # Cap per-run to avoid overwhelming the model's output window (Haiku 8k out).
+    # Remaining entries stay in the queue for the next drain run.
+    DRAIN_BATCH = int(os.environ.get("AUTOLEARN_DRAIN_BATCH", "10"))
+    batch = entries[:DRAIN_BATCH]
+    if len(entries) > DRAIN_BATCH:
+        print(f"drain: processing {DRAIN_BATCH} of {len(entries)} queued entries (remainder on next run)")
     model = _drain_model()
-    plan = _plan_reflect(entries, mem, model)
+    plan = _plan_reflect(batch, mem, model)
     if plan is None:
         # Keep the queue so the next drain retries -- never lose the commits to a
         # model hiccup or a missing CLI.
@@ -829,7 +835,13 @@ def drain() -> int:
     _apply_catalog_additions(mem, plan)
     created = [a["slug"] for a in plan.get("actions", []) if a.get("type") == "create"]
     _ensure_reachable(mem, created)
-    queue_path().unlink(missing_ok=True)
+    # Only remove the entries we just processed; keep the remainder for next run.
+    remaining = entries[DRAIN_BATCH:]
+    q = queue_path()
+    if remaining:
+        q.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in remaining) + "\n", encoding="utf-8")
+    else:
+        q.unlink(missing_ok=True)
     _stamp_drain()
     committed = _commit_drain(mem, len(changes))
     tail = (
