@@ -40,18 +40,24 @@ jobs:
 
       # On a PR synchronize the payload carries no commit message (only before/after
       # SHAs), and the PR *title* is stale — it describes the PR, not the new commits.
-      # Fetch the head commit's subject so the nexus/Discord line summarises what
-      # actually LANDED, in plain English. Uses the default repo-scoped GITHUB_TOKEN.
-      - name: Resolve head commit subject (PR synchronize only)
+      # Fetch the head commit's FULL message (subject + body) so the nexus/Discord
+      # entry can explain what actually LANDED, not just headline it. Uses the default
+      # repo-scoped GITHUB_TOKEN. The body goes into $GITHUB_ENV via a heredoc
+      # delimiter because it is multi-line.
+      - name: Resolve head commit message (PR synchronize only)
         if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
         run: |
-          subj=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.message' | head -1)
-          echo "SYNC_SUBJECT=$subj" >> "$GITHUB_ENV"
-          echo "resolved head subject: $subj"
+          msg=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.message')
+          {
+            echo "SYNC_MSG<<NEXUS_EOF"
+            printf '%s\n' "$msg"
+            echo "NEXUS_EOF"
+          } >> "$GITHUB_ENV"
+          echo "resolved head subject: $(printf '%s' "$msg" | head -1)"
 
       - name: Compose + append event
         env:
@@ -63,7 +69,8 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_SENDER: ${{ github.event.sender.login }}
-          SYNC_SUBJECT: ${{ env.SYNC_SUBJECT }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SYNC_MSG: ${{ env.SYNC_MSG }}
           PUSH_SHA: ${{ github.event.after }}
           PUSH_COMPARE: ${{ github.event.compare }}
           PUSH_ACTOR: ${{ github.event.pusher.name }}
@@ -71,7 +78,7 @@ jobs:
           REPO_NAME: ${{ github.repository }}
         run: |
           python - <<'PYEOF'
-          import json, os
+          import json, os, re
           from datetime import datetime, timezone
           from pathlib import Path
 
@@ -79,37 +86,75 @@ jobs:
           ts = datetime.now(timezone.utc).isoformat()
           event = os.environ["EVENT_NAME"]
 
+          DETAIL_CAP = 1200  # rich, but bounded so a Discord embed stays scannable
+
+          def clean_detail(text):
+              """Strip commit/PR boilerplate (Co-Authored-By, the generated-with
+              footer) and collapse blank runs, so the 'what was done' block is signal."""
+              if not text:
+                  return ""
+              keep = []
+              for ln in text.replace("\r\n", "\n").split("\n"):
+                  s = ln.strip()
+                  low = s.lower()
+                  if low.startswith("co-authored-by:"):
+                      continue
+                  if s.startswith("🤖 Generated with") or s.startswith("[Claude Code]"):
+                      continue
+                  keep.append(ln.rstrip())
+              out = re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
+              if len(out) > DETAIL_CAP:
+                  out = out[:DETAIL_CAP].rstrip() + " …"
+              return out
+
+          def rich(header, headline, detail):
+              """header (what happened) → **headline** → explanation block."""
+              parts = [header]
+              if headline:
+                  parts.append(f"**{headline.strip()[:300]}**")
+              if detail:
+                  parts.append("")   # blank line before the explanation
+                  parts.append(detail)
+              return "\n".join(parts)
+
+          def split_msg(msg):
+              """(subject, cleaned-body) from a full git commit message."""
+              seg = (msg or "").split("\n", 1)
+              subject = seg[0].strip()
+              detail = clean_detail(seg[1]) if len(seg) > 1 else ""
+              return subject, detail
+
           if event == "pull_request":
               action = os.environ.get("PR_ACTION", "")
               merged = os.environ.get("PR_MERGED", "false").lower() == "true"
               pr_num = os.environ.get("PR_NUMBER", "")
-              pr_title = os.environ.get("PR_TITLE", "")[:400]
+              pr_title = os.environ.get("PR_TITLE", "")[:300]
               pr_url = os.environ.get("PR_URL", "")
               author = os.environ.get("PR_AUTHOR", "unknown")
               sender = os.environ.get("PR_SENDER", "") or author
+              pr_body = clean_detail(os.environ.get("PR_BODY", ""))
 
               if action == "opened" or action == "reopened":
                   type_ = "note"
                   verb = "opened" if action == "opened" else "reopened"
-                  body = f"[{repo}] PR #{pr_num} {verb} by @{author}: {pr_title}"
+                  body = rich(f"[{repo}] PR #{pr_num} {verb} by @{author}", pr_title, pr_body)
               elif action == "closed":
                   if merged:
                       type_ = "decision"
-                      body = f"[{repo}] PR #{pr_num} MERGED by @{author}: {pr_title}"
+                      body = rich(f"[{repo}] PR #{pr_num} MERGED by @{author}", pr_title, pr_body)
                   else:
                       type_ = "note"
-                      body = f"[{repo}] PR #{pr_num} closed without merge by @{author}: {pr_title}"
+                      body = rich(f"[{repo}] PR #{pr_num} closed without merge by @{author}", pr_title, "")
               elif action == "ready_for_review":
                   type_ = "note"
-                  body = f"[{repo}] PR #{pr_num} marked ready for review by @{author}: {pr_title}"
+                  body = rich(f"[{repo}] PR #{pr_num} marked ready for review by @{author}", pr_title, pr_body)
               elif action == "synchronize":
-                  # New commits pushed onto an open PR — WIP progress. Summarise what
-                  # LANDED via the head commit's subject (the PR title is stale); fall
-                  # back to the PR title if the subject fetch returned nothing. The
-                  # pusher (sender) may differ from the PR author, so attribute sender.
+                  # New commits on an open PR — WIP progress. Explain via the head
+                  # commit's subject + body (the PR title is stale). Attribute the
+                  # pusher (sender), who may differ from the PR author.
                   type_ = "note"
-                  landed = (os.environ.get("SYNC_SUBJECT", "").strip() or pr_title)[:400]
-                  body = f"[{repo}] PR #{pr_num} updated by @{sender}: {landed}"
+                  subject, detail = split_msg(os.environ.get("SYNC_MSG", ""))
+                  body = rich(f"[{repo}] PR #{pr_num} updated by @{sender}", subject or pr_title, detail)
               else:
                   print(f"skipping unrecognised PR action: {action}")
                   raise SystemExit(0)
@@ -126,7 +171,7 @@ jobs:
           elif event == "push":
               sha = os.environ.get("PUSH_SHA", "")[:12]
               actor = os.environ.get("PUSH_ACTOR", "unknown")
-              msg = os.environ.get("COMMIT_MSG", "").split("\n", 1)[0][:200]
+              subject, detail = split_msg(os.environ.get("COMMIT_MSG", ""))
               compare = os.environ.get("PUSH_COMPARE", "")
 
               entry = {
@@ -134,7 +179,7 @@ jobs:
                   "agent": "aiuniversity",
                   "type": "note",
                   "id": "T-1",
-                  "body": f"[{repo}] push to main by @{actor} ({sha}): {msg}",
+                  "body": rich(f"[{repo}] push to main by @{actor} ({sha})", subject, detail),
                   "url": compare,
               }
           else:
