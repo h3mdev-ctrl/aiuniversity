@@ -1,0 +1,65 @@
+# safety -- three PreToolUse/PostToolUse hooks that catch the most dangerous
+# failure modes deterministically.
+#
+# 1. dangerous_bash_guard: regex-blocks rm -rf /, force-push to main, curl|bash,
+#    fork bombs, chmod 777 /, eval $(...), dd to block devices.
+#    The most universally cited hook across every Claude Code community.
+#
+# 2. self_modification_guard: blocks Write/Edit calls that target ~/.claude/hooks/
+#    or ~/.claude/settings.json. Closes the prompt-injection vector that disables
+#    security guards mid-session by editing the hook files themselves.
+#    Narrower than "protect all .env files" (credential_guard already covers reads).
+#
+# 3. prompt_injection_scanner: PostToolUse hook on Bash/Read/WebFetch. After the
+#    content is fetched, scans it for injection patterns (instruction overrides,
+#    persona hijacks, exfiltration commands, base64-encoded payloads, Unicode
+#    directional overrides, fake prompt delimiters). Cannot block (PostToolUse),
+#    but injects a WARNING into model context so it knows to treat the content as
+#    untrusted data.
+#
+# guardrails (from foundation layer-3) handles credential reads. This pack handles
+# destructive actions and adversarial inputs from external content.
+name: safety
+version: 0.1.0
+steps:
+  - id: hooks-installed
+    instruction: >
+      Install three safety hook scripts at ~/.claude/hooks/:
+        dangerous_bash_guard.py    -- blocks rm -rf /, force-push to main, curl|bash, etc.
+        self_modification_guard.py -- blocks writes to the hooks dir or settings.json
+        prompt_injection_scanner.py -- scans Bash/Read/WebFetch output for injection patterns
+
+      All three are PreToolUse or PostToolUse hooks. They are the hardest line of
+      defence against both accidental destruction and adversarial content injection.
+    check:
+      type: command_succeeds
+      cmd: python packs/safety/files/setup_safety.py --check-hook-files
+    fix: python packs/safety/files/setup_safety.py
+
+  - id: registered-in-settings
+    instruction: >
+      Wire all three hooks into ~/.claude/settings.json (merges safely with existing hooks):
+        dangerous_bash_guard    -> PreToolUse on Bash
+        self_modification_guard -> PreToolUse on Write|Edit
+        prompt_injection_scanner -> PostToolUse on Bash|Read|WebFetch
+    check:
+      type: command_succeeds
+      cmd: python packs/safety/files/setup_safety.py --check-registered
+    fix: python packs/safety/files/setup_safety.py
+
+  - id: hooks-actually-block
+    instruction: >
+      Behavioural proof — pipe known-dangerous inputs through each hook and confirm
+      they fire correctly:
+        rm -rf / -> blocked by dangerous_bash_guard
+        git push --force origin main -> blocked
+        write to ~/.claude/hooks/ -> blocked by self_modification_guard
+        "ignore all previous instructions" in read output -> WARNING from prompt_injection_scanner
+        harmless ls / normal write -> allowed (not a wall)
+    check:
+      type: command_succeeds
+      cmd: python packs/safety/files/setup_safety.py --test-blocking
+    on_fail: >
+      A hook didn't fire as expected. Reinstall:
+        python packs/safety/files/setup_safety.py
+      Then re-run the test to see which case failed.

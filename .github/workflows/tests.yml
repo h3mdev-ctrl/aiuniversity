@@ -1,0 +1,27 @@
+name: tests
+
+# Run the pack test-suite on every PR and on pushes to main, so the green check
+# on a PR is produced by CI, not just a claim that "it passed locally".
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The suite needs pytest to run and pyyaml for the pack loader (runner/verify.py).
+      # Everything else the tests shell out to is python (via sys.executable) or git,
+      # both already present on the runner -- no claude/gbrain binary required.
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest pyyaml
+
+      - name: Run test suite
+        run: python -m pytest -q

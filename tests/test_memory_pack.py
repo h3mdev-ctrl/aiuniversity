@@ -263,8 +263,10 @@ def test_memory_pack_loads_with_four_steps():
 def test_foundation_expands_memory_and_gbrain():
     resolver = make_disk_resolver(REPO / "packs")
     ids = [s["id"] for s in expand_steps(load_pack(REPO / "packs" / "foundation" / "pack.yaml"), resolver)]
-    # memory module expands first (layer 1), gbrain in layer 4
+    # memory module expands inline (layer 1)
     assert "memory/structure" in ids
     assert "memory/recall-probe" in ids
-    assert "gbrain-windows/install" in ids
-    assert ids.index("memory/structure") < ids.index("gbrain-windows/install")
+    # gbrain is now a standalone note step, not an inline module
+    assert "layer-4-capabilities-note" in ids
+    assert "gbrain-windows/install" not in ids
+    assert ids.index("memory/structure") < ids.index("layer-4-capabilities-note")

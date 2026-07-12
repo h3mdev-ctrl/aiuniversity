@@ -1,0 +1,47 @@
+# context -- two hooks that keep the model oriented across session starts
+# and compaction events.
+#
+# 1. session_start_context: SessionStart hook -- on every session open/resume,
+#    injects current date/time, git branch, last 5 commits, modified files, and
+#    a reminder to read CLAUDE.md if it exists. Stdout is injected directly into
+#    model context by Claude Code.
+#
+# 2. post_compact_reinject: PostCompact hook -- after every transcript compaction,
+#    injects a reminder to re-read CLAUDE.md and AGENTS.md before continuing.
+#    Closes "post-compaction rule amnesia" where the model forgets constraints it
+#    was following because the compaction summary didn't preserve them.
+#
+# These are low-cost, high-value hooks. Neither blocks; both inject.
+name: context
+version: 0.1.0
+steps:
+  - id: hooks-installed
+    instruction: >
+      Install two context hook scripts at ~/.claude/hooks/:
+        session_start_context.py  -- injects git/branch/commits context on session open
+        post_compact_reinject.py  -- reminds model to re-read CLAUDE.md after compaction
+    check:
+      type: command_succeeds
+      cmd: python packs/context/files/setup_context.py --check-hook-files
+    fix: python packs/context/files/setup_context.py
+
+  - id: registered-in-settings
+    instruction: >
+      Register both hooks in ~/.claude/settings.json:
+        session_start_context -> SessionStart (no matcher)
+        post_compact_reinject -> PostCompact (no matcher)
+    check:
+      type: command_succeeds
+      cmd: python packs/context/files/setup_context.py --check-registered
+    fix: python packs/context/files/setup_context.py
+
+  - id: hooks-run-clean
+    instruction: >
+      Verify both hooks run without error (stdout is the injected context;
+      these are non-blocking informational hooks).
+    check:
+      type: command_succeeds
+      cmd: python packs/context/files/setup_context.py --test-blocking
+    on_fail: >
+      A hook errored. Reinstall:
+        python packs/context/files/setup_context.py

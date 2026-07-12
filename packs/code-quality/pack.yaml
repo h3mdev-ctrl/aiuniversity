@@ -1,0 +1,52 @@
+# code-quality -- two hooks that close the gap between "Claude wrote code"
+# and "the code actually works and is formatted."
+#
+# 1. auto_format: PostToolUse(Write|Edit) -- runs the project formatter
+#    immediately after every file write. Detects formatter from extension:
+#    .py -> ruff/black/autopep8, .ts/.tsx/.js/.jsx/.json/.yaml/.md -> prettier,
+#    .go -> gofmt, .rs -> rustfmt. Silently skips if no formatter available.
+#    Thomas Wiegold cited this as the single highest-ROI hook he ships.
+#
+# 2. stop_verify: Stop hook -- before Claude can declare "done", runs the
+#    project test suite and type checker. Blocks (exit 2) if they fail.
+#    OPT-IN per project: only runs if .stop_verify exists in the repo root,
+#    OR if STOP_VERIFY=1 is set. Silently skips everywhere else so it doesn't
+#    time out on large test suites in projects you haven't opted in.
+#    To enable: touch .stop_verify in the project root.
+#    Set STOP_VERIFY_SKIP=1 to bypass for a single turn.
+#
+# These close the "Claude says it's done but tests are red" failure mode.
+name: code-quality
+version: 0.1.0
+steps:
+  - id: hooks-installed
+    instruction: >
+      Install two code quality hook scripts at ~/.claude/hooks/:
+        auto_format.py  -- runs formatter after every Write/Edit
+        stop_verify.py  -- runs test suite + type check before every Stop
+    check:
+      type: command_succeeds
+      cmd: python packs/code-quality/files/setup_code_quality.py --check-hook-files
+    fix: python packs/code-quality/files/setup_code_quality.py
+
+  - id: registered-in-settings
+    instruction: >
+      Register both hooks in ~/.claude/settings.json:
+        auto_format  -> PostToolUse on Write|Edit
+        stop_verify  -> Stop (no matcher)
+    check:
+      type: command_succeeds
+      cmd: python packs/code-quality/files/setup_code_quality.py --check-registered
+    fix: python packs/code-quality/files/setup_code_quality.py
+
+  - id: hooks-behave
+    instruction: >
+      Verify stop_verify passes on a project with no test suite (shouldn't block
+      where nothing is configured) and auto_format is present (formatter invocation
+      is exercised only on real projects — verified by the pack installer on first use).
+    check:
+      type: command_succeeds
+      cmd: python packs/code-quality/files/setup_code_quality.py --test-blocking
+    on_fail: >
+      A hook errored. Reinstall:
+        python packs/code-quality/files/setup_code_quality.py
