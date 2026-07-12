@@ -218,9 +218,9 @@ great for "I just learned this, file it now."
 
 For the **unattended** path (`--drain`, run headless on a cadence), we model a more
 capable design borrowed from a mature, proven system (Andrew's `global-evolution`
-drain). Instead of only ever _creating_, the drain reflects over the WHOLE queue at
-once, is shown the EXISTING memory (routing index + every slug), and returns a
-**plan of actions**:
+drain). Instead of only ever _creating_, the drain reflects over a **batch** of the
+queue (up to `AUTOLEARN_DRAIN_BATCH`, default 10 — see below), is shown the EXISTING
+memory (routing index + every slug), and returns a **plan of actions**:
 
 - **create** -- a genuinely new lesson (slug must not already exist)
 - **update** -- refines an existing memory; returns its FULL new content
@@ -247,6 +247,12 @@ What keeps it safe (the same "no model is trusted" principle):
 - **index growth -> CATALOG.md** (on-demand), never the always-loaded MEMORY.md; a
   safety net guarantees every created file is routable so the doctor never goes dark.
 - **one git commit per drain** -> a bad autonomous write is `git revert HEAD`.
+- **batched per run (`AUTOLEARN_DRAIN_BATCH`, default 10)** -> the reflection prompt
+  embeds every commit body, and a cheap model's OUTPUT window (~8k tokens on Haiku)
+  can't emit a complete JSON plan for a deep queue -- it truncates mid-object and the
+  plan is discarded ("no usable plan"). The drain processes at most a batch, KEEPS the
+  remainder, and the backlog clears over successive scheduled runs. A pre-batch drain
+  against a 36-deep queue silently no-opped forever; this is the fix.
 
 Run it (needs the `claude` CLI + a cheap model; ~cents-equivalent, or plan quota):
 
