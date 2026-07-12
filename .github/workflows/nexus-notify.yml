@@ -1,8 +1,11 @@
 name: nexus-notify
 
-# Route aiuniversity events (PR opened, PR closed/merged, push to main) through the
-# nexus collaboration log so both agents (Andrew's Claude, Jason's Claude) see them
+# Route aiuniversity events (PR opened, updated, closed/merged, push to main) through
+# the nexus collaboration log so both agents (Andrew's Claude, Jason's Claude) see them
 # via the nexus Discord webhook without either machine polling GitHub.
+#
+# `synchronize` is included so WIP commits pushed onto an OPEN PR also notify — more
+# chatter, but visible progress. Drafts stay silent (the draft guard on the job).
 #
 # Requires an aiuniversity repo secret NEXUS_PAT with `contents: write` on
 # h3mdev-ctrl/nexus. See setup instructions at the bottom of this file.
@@ -12,7 +15,7 @@ name: nexus-notify
 
 on:
   pull_request:
-    types: [opened, closed, reopened, ready_for_review]
+    types: [opened, closed, reopened, ready_for_review, synchronize]
   push:
     branches: [main]
 
@@ -44,6 +47,7 @@ jobs:
           PR_ACTION: ${{ github.event.action }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_SENDER: ${{ github.event.sender.login }}
           PUSH_SHA: ${{ github.event.after }}
           PUSH_COMPARE: ${{ github.event.compare }}
           PUSH_ACTOR: ${{ github.event.pusher.name }}
@@ -66,6 +70,7 @@ jobs:
               pr_title = os.environ.get("PR_TITLE", "")[:400]
               pr_url = os.environ.get("PR_URL", "")
               author = os.environ.get("PR_AUTHOR", "unknown")
+              sender = os.environ.get("PR_SENDER", "") or author
 
               if action == "opened" or action == "reopened":
                   type_ = "note"
@@ -81,6 +86,11 @@ jobs:
               elif action == "ready_for_review":
                   type_ = "note"
                   body = f"[{repo}] PR #{pr_num} marked ready for review by @{author}: {pr_title}"
+              elif action == "synchronize":
+                  # New commits pushed onto an open PR — WIP progress. The pusher
+                  # (sender) may differ from the PR author, so attribute to sender.
+                  type_ = "note"
+                  body = f"[{repo}] PR #{pr_num} updated (new commits) by @{sender}: {pr_title}"
               else:
                   print(f"skipping unrecognised PR action: {action}")
                   raise SystemExit(0)
