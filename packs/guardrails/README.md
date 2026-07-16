@@ -4,9 +4,19 @@ Layer 3 of the foundation — **automatic backstops that catch mistakes by CODE,
 by hoping**. The **default** guard is proven by a behavioural check (a real gate, not
 a present file):
 - **credential guard** (default) — a PreToolUse hook that blocks Claude reading
-  credential files (`.env`, private keys, `.aws/credentials`) via `Read` OR `Bash`
-  (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`). Fires rarely (only on a real
-  secret read), so it doesn't get in your way.
+  credential files (`.env`, private keys, `.aws/credentials`, cert/key files,
+  `credential*.json`/`secret*.json`/`service-account*.json`) via `Read` OR `Bash`
+  (`cat`/`less`/`head`/`tail`/`type`/`Get-Content`/`strings`/`xxd`/`od`). Fires
+  rarely (only on a real secret read), so it doesn't get in your way. Matches
+  on whole shell words, not substrings — `grep "process.env" file.ts` passes,
+  a real path like `config/.env` still blocks. The block message doesn't just
+  say no: it names the safe command for the question Claude was probably
+  asking (`jq keys` for field names, a name-only grep for existence, a
+  sha256[:12] hash for comparing two secrets) so the same reflex gets
+  satisfied a different way instead of bouncing again next turn on the same
+  file. v0.2 (learned from 110+ real-world blocks on the same handful of raw
+  reads): a message that only says "blocked" gets hit again; one that hands
+  back the working command doesn't.
 
 ### The session-end guard is opt-in
 

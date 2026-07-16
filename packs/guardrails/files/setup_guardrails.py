@@ -134,6 +134,11 @@ def test_blocking() -> int:
         ("cat .env",    {"tool_name": "Bash", "tool_input": {"command": "cat .env && echo hi"}}, True),
         ("SSH key read",{"tool_name": "Read", "tool_input": {"file_path": "~/.ssh/id_rsa"}}, True),
         ("harmless ls", {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}, False),
+        # regression: whole-word matching must not false-positive on a bare
+        # identifier that merely contains ".env" as a substring
+        ("grep process.env", {"tool_name": "Bash", "tool_input": {"command": 'grep "process.env" file.ts'}}, False),
+        # explicit bypass prefix must still let a real credential read through
+        ("explicit bypass",  {"tool_name": "Bash", "tool_input": {"command": "CLAUDE_CRED_GUARD=off cat .env"}}, False),
     ]
     failed: list[str] = []
     for label, payload, should_block in cases:

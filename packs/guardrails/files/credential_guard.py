@@ -14,7 +14,17 @@ Blocks:
 - Bash tool on a command that would read a credential path (cat/less/type/head/
   tail/Get-Content and friends).
 
-Bypass (rare, explicit only): set CLAUDE_CRED_GUARD=off in the environment.
+The block message doesn't just say no -- it names the safe command for the
+question the agent was probably asking (field names, existence, value diff),
+so the SAME reflex gets satisfied a different way instead of just bouncing.
+This matters more than it looks: a guard that only says "blocked" gets hit
+again next turn, because the agent still has no faster path than the one that
+just failed.
+
+Bypass (rare, explicit only): prefix the command with `CLAUDE_CRED_GUARD=off `.
+Not a real env var read from the parent shell -- deliberately. An env var set
+once in a parent shell would silently bypass every descendant call; a prefix on
+the command string is visible in the transcript and audited per call.
 """
 import json
 import os
@@ -22,25 +32,59 @@ import re
 import sys
 
 CRED_PATTERNS = [
-    r"(?:^|[/\\])\.env(?:$|\.[a-zA-Z0-9_-]+$)",     # .env, .env.local, .env.production
+    r"(?:^|[/\\])\.env(?:$|\.[a-zA-Z0-9_-]+$)",       # .env, .env.local, .env.production
     r"(?:^|[/\\])credentials\.json$",
     r"(?:^|[/\\])\.credentials$",
-    r"(?:^|[/\\])id_(?:rsa|dsa|ecdsa|ed25519)$",     # SSH private keys
+    r"(?:^|[/\\])id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$",  # SSH keys
     r"(?:^|[/\\])\.aws[/\\]credentials$",
     r"(?:^|[/\\])\.ssh[/\\]id_",
     r"(?:^|[/\\])\.npmrc$",
     r"(?:^|[/\\])\.netrc$",
     r"(?:^|[/\\])\.pypirc$",
+    r"\.(?:pem|key|p12|pfx)$",                         # cert/key files
+    r"(?:credential|secret|service-?account)[^/\\]*\.json$",
 ]
 CRED_RE = re.compile("|".join(CRED_PATTERNS), re.IGNORECASE)
 READ_CMDS_RE = re.compile(
-    r"\b(?:cat|less|more|head|tail|type|Get-Content|nano|vim|vi|code)\b",
+    r"\b(?:cat|tac|less|more|head|tail|type|Get-Content|gc|nano|vim|vi|code|"
+    r"strings|xxd|od|hexdump)\b",
     re.IGNORECASE,
 )
+
+SAFE_ALTERNATIVES = """\
+BLOCKED: {reason}
+
+Don't read the whole file -- go straight to the safe form of the question
+you were probably asking:
+  - field names only:   jq 'keys' <file>
+  - names + types:       jq 'to_entries|map({{k:.key,t:(.value|type)}})' <file>
+  - does a var exist:    grep -oE '^[A-Z_]+=' .env
+  - compare two secrets: python -c "import hashlib;print(hashlib.sha256(open(r'<file>').read().encode()).hexdigest()[:12])"
+  - anything else:       usually answerable from docs/--help without reading the file at all
+
+If you genuinely need the raw file (rare -- e.g. rotating a value), prefix the
+command with CLAUDE_CRED_GUARD=off so the bypass is explicit and visible."""
 
 
 def is_credential_path(path: str) -> bool:
     return bool(path) and bool(CRED_RE.search(str(path)))
+
+
+def _bash_reads_credential(cmd: str) -> "str | None":
+    """Return the matched token if this Bash command would read a credential
+    path to stdout/terminal, else None. Splits on shell word-boundaries and
+    checks WHOLE words -- not substrings -- so `process.env` (a bare
+    identifier) doesn't false-positive on the `.env` pattern the way naive
+    substring matching would; a real path like `config/.env` still matches
+    because the slash precedes it.
+    """
+    if not READ_CMDS_RE.search(cmd):
+        return None
+    for word in re.split(r"[\s|;&()=`<>]+", cmd):
+        word = word.strip().strip('"').strip("'")
+        if word and is_credential_path(word):
+            return word
+    return None
 
 
 def check(event: dict) -> "str | None":
@@ -49,26 +93,25 @@ def check(event: dict) -> "str | None":
     if tool == "Read":
         path = ti.get("file_path", "")
         if is_credential_path(path):
-            return f"BLOCKED: reading credential-bearing file {path!r}"
+            return f"reading credential-bearing file {path!r}"
     if tool == "Bash":
         cmd = ti.get("command", "") or ""
-        if READ_CMDS_RE.search(cmd):
-            for token in re.findall(r"\S+", cmd):
-                if is_credential_path(token):
-                    return f"BLOCKED: bash command would read credential file (matched {token!r})"
+        if re.match(r"^\s*CLAUDE_CRED_GUARD=(off|0|false)\b", cmd, re.IGNORECASE):
+            return None
+        hit = _bash_reads_credential(cmd)
+        if hit:
+            return f"bash command would read credential file (matched {hit!r})"
     return None
 
 
 def main() -> int:
-    if os.environ.get("CLAUDE_CRED_GUARD", "").lower() == "off":
-        return 0  # explicit bypass
     try:
         event = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
         return 0  # malformed input: don't block by accident
-    msg = check(event)
-    if msg:
-        print(msg, file=sys.stderr)
+    reason = check(event)
+    if reason:
+        print(SAFE_ALTERNATIVES.format(reason=reason), file=sys.stderr)
         return 2
     return 0
 

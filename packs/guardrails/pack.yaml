@@ -10,7 +10,7 @@
 #
 # Commands run from the repo root.
 name: guardrails
-version: 0.1.0
+version: 0.2.0
 steps:
   - id: hook-installed
     instruction: >
