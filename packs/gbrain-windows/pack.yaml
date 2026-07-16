@@ -40,8 +40,18 @@
 # a reliable chat model and a local 8B is NOT reliable for it -- you do NOT need
 # codex, use structural-only or a cheap hosted model. Plus the openai:-not-ollama:
 # and cmd.exe-not-PS-2>&1 Windows traps.
+#
+# AUTOPILOT DAEMON SILENTLY NEVER RUNS on Windows (found separately from the
+# dream-cycle traps above -- this one blocks even structural, model-free jobs):
+# see files/autopilot_worker_spawn_windows.md. Symptom: sources stay stale no
+# matter how long `gbrain autopilot` has "been running", with
+# `worker spawn failed ... ENOENT ... uv_spawn` in the foreground log. Root
+# cause: `which gbrain` under git-bash returns a POSIX-style, extension-less
+# path that Windows' raw process spawn can't resolve. Has a source-level fix
+# (if you have a gbrain checkout) and a zero-source workaround (scheduled
+# `sync --all` + `extract --stale` instead of relying on `--install`).
 name: gbrain-windows
-version: 0.2.1
+version: 0.2.2
 variants: [local, supabase]
 default_variant: local
 steps:

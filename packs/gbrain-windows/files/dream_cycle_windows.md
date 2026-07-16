@@ -174,6 +174,17 @@ directly for:
 - `embedding_dimensions` -- must match the model's actual output size
 - `takes.bootstrap_enabled` -- must be `true` before `gbrain takes extract` will run
 
+## Before any of this: confirm autopilot's worker actually spawns
+
+Everything below assumes dream jobs get to RUN. On a separate, more
+fundamental Windows bug, `gbrain autopilot`'s own worker process can fail to
+spawn at all (`ENOENT ... uv_spawn`), so every job -- structural or
+LLM-driven -- sits `waiting` forever with no error surfaced anywhere except
+the autopilot foreground log. If your sources stay stale no matter how long
+autopilot has "been running," check that FIRST: see
+`autopilot_worker_spawn_windows.md` for the diagnostic + fix. Don't debug
+dream/deep-extract config on a daemon whose worker never even started.
+
 ## Two Windows gotchas that cost an hour each
 
 1. **Use the `openai:` provider prefix, NOT `ollama:`, for the chat model.**

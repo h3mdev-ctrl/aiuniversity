@@ -53,6 +53,12 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
 - ❌ **Running a nightly LLM deep-extract on an unreliable local 8B.** Structural
   dream is free + model-free; the extract needs a reliable chat model (see
   `files/dream_cycle_windows.md`). You do NOT need codex.
+- ❌ **Trusting `gbrain autopilot --install` blindly on Windows.** Its worker
+  process can fail to spawn (`ENOENT ... uv_spawn`) so every job -- including
+  free, structural ones -- sits `waiting` forever with no loud error. Check
+  the foreground log before assuming the daemon is doing anything; see
+  `files/autopilot_worker_spawn_windows.md` for the diagnostic and both the
+  source-level fix and the zero-source workaround.
 
 ## Related packs
 
