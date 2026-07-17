@@ -50,6 +50,18 @@
 # path that Windows' raw process spawn can't resolve. Has a source-level fix
 # (if you have a gbrain checkout) and a zero-source workaround (scheduled
 # `sync --all` + `extract --stale` instead of relying on `--install`).
+#
+# DAY-2 RECOVERY when a LIVE gbrain wedges (its background maintenance stops):
+# see files/gbrain_recovery_windows.md. Symptoms + the tool's-own-dashboard checks
+# + prescribed fixes for: a WEDGED job queue / crashed supervisor (restart it
+# DETACHED FROM GIT-BASH, not PowerShell -- the /tmp/.gbrain home trap), the
+# session-mode connection pool EMAXCONNSESSION limit (do NOT switch to the
+# transaction pooler -- it breaks gbrain's session-scoped job locks), and stale
+# `<head>` sync_failures that no `sync --skip-failed`/`--retry-failed` clears (ack
+# them directly in ~/.gbrain/sync-failures.jsonl). The matching resolver rows that
+# make this manual discoverable from a plain-English symptom are in
+# files/example_gbrain_ops_resolver.md (the operational sibling of
+# example_brain_filing.md).
 name: gbrain-windows
 version: 0.2.2
 variants: [local, supabase]

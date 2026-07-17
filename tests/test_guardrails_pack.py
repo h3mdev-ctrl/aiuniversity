@@ -107,12 +107,27 @@ def test_guard_allows_harmless_bash(tmp_path):
     assert r.returncode == 0
 
 
-def test_bypass_env_var_disables_guard(tmp_path):
+def test_bypass_command_prefix_disables_guard(tmp_path):
+    # The ONLY sanctioned bypass is a `CLAUDE_CRED_GUARD=off ` PREFIX on the Bash
+    # command itself — NOT an inherited env var. The hook deliberately never reads
+    # os.environ["CLAUDE_CRED_GUARD"]: a var set once in a parent shell would
+    # silently bypass every descendant call (see credential_guard.py header + the
+    # command-prefix check). A per-command prefix keeps each bypass explicit.
+    run("setup_guardrails.py", home=tmp_path)
+    r = pipe_guard(tmp_path,
+                   {"tool_name": "Bash",
+                    "tool_input": {"command": "CLAUDE_CRED_GUARD=off cat .env"}})
+    assert r.returncode == 0   # explicit per-command bypass
+
+
+def test_env_var_alone_does_NOT_bypass(tmp_path):
+    # Guard against regressing to env-var bypass: even with CLAUDE_CRED_GUARD=off
+    # in the environment, a Read of a credential file must still be blocked.
     run("setup_guardrails.py", home=tmp_path)
     r = pipe_guard(tmp_path,
                    {"tool_name": "Read", "tool_input": {"file_path": "/x/.env"}},
                    bypass=True)
-    assert r.returncode == 0   # explicit bypass
+    assert r.returncode == 2 and "BLOCKED" in r.stderr
 
 
 def test_test_blocking_mode_passes_after_install(tmp_path):
