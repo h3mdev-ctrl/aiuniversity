@@ -1,10 +1,11 @@
-# agent-honesty -- three guardrails against confident-but-false reporting.
+# agent-honesty -- four guardrails against confident-but-false reporting.
 #
 # The failure this pack targets: a model that reports CONFIDENTLY instead of
-# TRUTHFULLY. Three rules, each naming the moment it fires:
+# TRUTHFULLY. Four rules, each naming the moment it fires:
 #   1. no-phantom-done        -- never claim done/pushed/logged without a receipt
 #   2. research-before-asserting -- check the source before stating a fact/constraint
 #   3. judge-to-spec          -- grade an output against the real spec, not memory
+#   4. no-vague-time-claims   -- check the clock before naming a time of day/date
 #
 # Behavioural rules can't be fully enforced by code the way a credential-read hook
 # can, so this pack ships the HONEST shape the rest of aiuniversity uses for soft
@@ -17,16 +18,18 @@
 #
 # Requested via Nexus (thread agent-honesty-pack). Commands run from the repo root.
 name: agent-honesty
-version: 0.1.0
+version: 0.2.0
 steps:
   - id: rules-installed
     instruction: >
-      Install the three honesty guardrails as an always-loaded rules doc at
+      Install the four honesty guardrails as an always-loaded rules doc at
       ~/.claude/agent_honesty.md. Each guardrail names the moment it fires, the
       rule, why it matters, and what to do instead: no-phantom-done (claim a
       side-effect only if the tool call ran this turn and you show the receipt),
       research-before-asserting (check the source before stating a load-bearing
-      fact), judge-to-spec (grade against the real spec, not a remembered copy).
+      fact), judge-to-spec (grade against the real spec, not a remembered copy),
+      no-vague-time-claims (check the clock before naming a time of day or date --
+      don't infer it from message order or how a long conversation "feels").
     check:
       type: command_succeeds
       cmd: python packs/agent-honesty/files/setup_agent_honesty.py --check-doc
@@ -74,8 +77,9 @@ steps:
           python -m runner.cli remediate packs/code-quality
         - no-phantom-done for CLAIMS: wire phantom_claim_lint.py as a Stop hook so an
           unevidenced completion claim raises a nudge (see README "Enforcement").
-      research-before-asserting and judge-to-spec have no clean mechanical surface --
-      they stay soft rules by design; naming the trigger in context is the lever.
+      research-before-asserting, judge-to-spec, and no-vague-time-claims have no
+      clean mechanical surface -- they stay soft rules by design; naming the
+      trigger in context is the lever.
       This step is informational and always passes.
     check:
       type: command_succeeds

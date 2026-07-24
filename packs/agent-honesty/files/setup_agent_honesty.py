@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup_agent_honesty.py -- install the three agent-honesty guardrails as an
+setup_agent_honesty.py -- install the four agent-honesty guardrails as an
 always-loaded rules doc, wire a pointer into the constitution, and prove the
 deterministic phantom-claim linter fires.
 
@@ -18,11 +18,12 @@ import sys
 
 DOC_NAME = "agent_honesty.md"
 
-# The three guardrail headers that MUST be present for the doc to count as installed.
+# The four guardrail headers that MUST be present for the doc to count as installed.
 GUARDRAIL_MARKERS = (
     "## 1. no-phantom-done",
     "## 2. research-before-asserting",
     "## 3. judge-to-spec",
+    "## 4. no-vague-time-claims",
 )
 
 POINTER_START = "<!-- agent-honesty-pointer:start -->"
@@ -30,13 +31,15 @@ POINTER_END = "<!-- agent-honesty-pointer:end -->"
 POINTER_BLOCK = f"""{POINTER_START}
 ## Agent honesty (always applies)
 
-Three honesty guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
+Four honesty guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
 **no-phantom-done** (never claim done without a receipt -- the tool call ran this
 turn and you show it), **research-before-asserting** (check the source before
-stating a load-bearing fact/constraint, don't complete a pattern from memory), and
-**judge-to-spec** (grade an output against the real spec, not a remembered copy).
-Read that file; when a completion claim, a load-bearing assertion, or a pass/fail
-judgment is in play, follow it.
+stating a load-bearing fact/constraint, don't complete a pattern from memory),
+**judge-to-spec** (grade an output against the real spec, not a remembered copy),
+and **no-vague-time-claims** (check the clock before naming a time of day or date --
+don't infer it from message order or conversation feel). Read that file; when a
+completion claim, a load-bearing assertion, a pass/fail judgment, or a date/time
+claim is in play, follow it.
 {POINTER_END}
 """
 

@@ -39,7 +39,7 @@ def test_install_writes_doc_and_wires_constitution(tmp_path):
     assert doc.exists()
     text = doc.read_text(encoding="utf-8")
     for marker in ("## 1. no-phantom-done", "## 2. research-before-asserting",
-                   "## 3. judge-to-spec"):
+                   "## 3. judge-to-spec", "## 4. no-vague-time-claims"):
         assert marker in text
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "agent-honesty-pointer:start" in claude_md
