@@ -1,0 +1,125 @@
+# memory-socket -- wire memory into the agent LIFECYCLE, not just onto disk.
+#
+# The `memory` pack builds the STORE: a memory/ folder, an always-loaded resolver
+# index, a doctor that keeps every note reachable. This pack builds the WIRING:
+# the lifecycle points where that store is read from and written to.
+#
+# The distinction is the whole lesson. A store with no sockets is a library
+# nobody walks into -- it audits perfectly and changes nothing. Most people who
+# say "I set up memory for Claude" have built exactly that.
+#
+# Modelled on nousresearch/hermes-agent's MemoryProvider, which defines the same
+# attachment points as explicit methods (prefetch, on_pre_compress, on_delegation,
+# on_session_end). Claude Code exposes the same surface as hooks. Different
+# harness, same sockets.
+#
+# Commands run from the repo root (where packs/ lives).
+name: memory-socket
+version: 0.1.0
+steps:
+  - id: store-present
+    instruction: >
+      A socket needs something to plug into. This runs the memory module end to
+      end -- the memory/ folder, the always-loaded index, the doctor, and the
+      cold-recall probe. If you have already run the memory pack this passes
+      immediately; if not, it sets the store up now.
+    module: memory
+
+  - id: sockets-mapped
+    instruction: >
+      See the whole surface at once. This lists all six sockets, the lifecycle
+      event each attaches to, whether it is required, and whether anything is
+      currently plugged in. Read the DARK rows -- each one is a place your agent
+      is currently forgetting something. Nothing is changed by this step.
+    check:
+      type: contains
+      cmd: python packs/memory-socket/files/socket_doctor.py --list
+      expect: "sockets wired"
+    on_fail: >
+      The doctor could not read your settings.json (exit 2). Check that
+      ~/.claude/settings.json exists and is valid JSON -- `python -c "import
+      json,pathlib;json.loads(pathlib.Path.home().joinpath('.claude/settings.json').read_text())"`
+      will name the parse error. Set CLAUDE_HOME if your config lives elsewhere.
+
+  - id: recall-wired
+    instruction: >
+      Plug in the RECALL socket (UserPromptSubmit) -- retrieve the memories
+      relevant to each prompt before the model answers. This is the one socket
+      that is not optional: without it the store is never read, and every other
+      socket just feeds a folder nobody opens.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory-socket/files/socket_doctor.py --socket recall
+    on_fail: >
+      Nothing is registered on UserPromptSubmit. Copy
+      packs/memory-socket/files/examples/recall_on_prompt.py into your hooks
+      folder and register it on UserPromptSubmit in ~/.claude/settings.json.
+      Read the file first -- the two comment blocks (the absolute relevance floor,
+      and per-project store resolution) are the parts people get wrong.
+
+  - id: recall-live
+    instruction: >
+      Prove RECALL actually fires. Registration is not evidence -- a hook whose
+      script was deleted or whose store does not resolve is registered and
+      silent, and passes every presence audit. This EXECUTES it with a real
+      prompt and demands output. Run it from a project that HAS memory.
+    check:
+      type: contains
+      cmd: python packs/memory-socket/files/socket_doctor.py --probe recall
+      expect: "LIVE"
+    on_fail: >
+      The hook is registered but emitted nothing. Two causes, in order of
+      likelihood: (1) you are running from a directory with no memory/ folder --
+      cd into a project that has one and re-probe; (2) the hook genuinely fails.
+      Run it by hand to see:
+        echo '{"prompt":"how do I set up the memory index","cwd":"."}' | python <your-hook>.py
+      A hook that prints nothing here is dark no matter what settings.json says.
+
+  - id: identity-wired
+    instruction: >
+      Plug in the IDENTITY socket (SessionStart) -- inject the always-on model of
+      the user. This is a separate socket from recall on purpose: retrieval
+      matches the PROMPT, so a user model delivered by retrieval would only ever
+      surface when the user talked about themselves.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory-socket/files/socket_doctor.py --socket identity
+    on_fail: >
+      Nothing is registered on SessionStart. Copy
+      packs/memory-socket/files/examples/identity_on_start.py into your hooks
+      folder and register it on SessionStart. It expects a capped
+      user_representation.md in your memory folder; if you do not have one yet,
+      the hook stays silent by design rather than breaking startup.
+
+  - id: salvage-wired
+    instruction: >
+      Plug in the SALVAGE + RESTORE pair (PreCompact / PostCompact). Compaction
+      discards the session's measurements, decisions and corrections while
+      keeping the static rules. Salvage distils the doomed window before it goes;
+      restore re-injects it after. Optional -- but this is where long sessions
+      quietly lose the most.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory-socket/files/socket_doctor.py --socket salvage
+    on_fail: >
+      Nothing is registered on PreCompact. Copy BOTH
+      packs/memory-socket/files/examples/salvage_pre_compact.py and
+      restore_post_compact.py -- they are one mechanism split across two events,
+      and either half alone does nothing useful. Register them on PreCompact and
+      PostCompact respectively.
+
+  - id: no-silent-sockets
+    instruction: >
+      The audit that matters: every socket you have plugged in must actually
+      EMIT. This is the difference between a memory system and the appearance of
+      one. A registered-but-silent hook is worse than an unwired one, because it
+      passes every check you would think to run.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory-socket/files/socket_doctor.py --check
+    on_fail: >
+      A required socket is dark. Run
+        python packs/memory-socket/files/socket_doctor.py --list
+      to see which, then --probe <socket> on each wired one to find the silent
+      ones. Fix the dark required sockets first (recall, identity); the optional
+      ones can follow.
