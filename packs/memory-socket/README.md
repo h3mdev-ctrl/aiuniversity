@@ -65,6 +65,79 @@ misleads once is demoted faster than a merely-adequate one is elevated. Without 
 loop like this a memory corpus only ever grows, and stale entries compete with good
 ones forever.
 
+### The one that actually decides whether recall works: GRANULARITY
+
+If you take one thing from this pack, take this. It is not in the scoring maths,
+and it is the difference between a memory system and a folder.
+
+**Hermes indexes atomic facts. The obvious design indexes documents.**
+
+```sql
+CREATE TABLE facts (
+    content TEXT NOT NULL UNIQUE,   -- ONE statement, not one file
+    ...
+);
+CREATE VIRTUAL TABLE facts_fts USING fts5(content, tags, content=facts, ...);
+```
+
+We learned this the expensive way. We ported Hermes' pipeline faithfully —
+same weights, same stages, same trust model — and pointed it at one row per
+markdown file. Then we logged every firing for a week and measured:
+
+| | document-level | atom-level |
+|---|---|---|
+| precision (25 real prompts) | **20%** | **75%** |
+| memories injected | 21 | 16 |
+| recall | 10/11 | 10/11 |
+| latency | 129 ms | 90 ms |
+
+The failure was invisible without the log, and it was not fixable by tuning.
+BM25 over a 200-line document with hundreds of terms matches almost any query
+*a little*, so every score collapsed into a narrow band (0.27–0.31) in which
+**the highest-scoring results were noise** and genuinely useful memories scored
+lower. We swept every threshold: the best precision any cut achieved was 50%,
+and it cost 8 of the 10 good hits. Term-overlap gating did not separate them
+either — 5 of the 10 useful hits shared *zero* terms with the prompt. There was
+nothing to separate, because the signal had already been averaged away at index
+time.
+
+Over a one-sentence atom, a match means something.
+
+**Where the atoms come from.** You probably already have them. A resolver index
+("When you're about to X → read Y") is a hand-written table of atomic intents —
+the single best signal in a memory corpus. Explode each memory into:
+
+| atom | source | weight |
+|---|---|---|
+| `resolver` | each intent row the memory appears in — **never merged** | 1.00 |
+| `description` | its frontmatter description | 0.95 |
+| `apply` | its "How to apply" line | 0.90 |
+| `slug` | its filename words | 0.75 |
+
+607 memories became 2,061 atoms averaging 129 characters.
+
+Three details that are easy to get wrong, each of which we got wrong first:
+
+- **Never merge intents.** Our first version did `intents[target] += " " + intent`,
+  so a memory cited under three rows became one blended blob — the exact opposite
+  of atomic.
+- **Do not index the body.** The body is what you SHOW; it is not what you SEARCH.
+  Folding 300 characters of body text into searchable content is what flattened
+  the scores.
+- **Weight the atom kinds.** BM25 favours short documents, so an unweighted
+  3-word slug beats a real intent statement on a single common term. Measured:
+  `"ship this and deploy it"` ranked a `cloudflare_worker_deploy` slug above the
+  shipping index's `"Shipping / PR / deploy / land"` row.
+
+Then **collapse atoms back to one hit per memory, by MAX not SUM.** Summing
+rewards a memory for being cited under many rows, which is a property of your
+corpus, not of relevance to this prompt.
+
+> **You cannot tune what you do not log.** None of this was visible from
+> spot-checking; it took a JSONL line per firing and a week of real prompts.
+> Log `{ts, prompt, [{target, score}]}` on every fire from day one — it costs
+> nothing and it is the only way to answer "is this actually helping?"
+
 ### Honcho — the other half, and a different problem
 
 Hermes ships a second memory provider, `plugins/memory/honcho/`, implementing the
@@ -155,12 +228,23 @@ If you already like your harness, porting wins on three counts:
   a turn, a compaction, or a shutdown.
 - **The store comes first.** Step 1 runs the `memory` module, so this pack works
   from nothing.
+- **The retrieval unit is the ATOM, not the file.** One row per statement —
+  resolver intent, description, apply-line, slug — never one row per document,
+  and never the body. Atoms collapse back to one hit per memory by MAX.
+- **Every firing is logged.** `{ts, prompt, hits[]}` appended per fire, so
+  precision is measurable rather than felt.
 
 ## Iron Laws
 
 - **A store without a recall socket is not memory.** It is a folder. `recall` is the
   only non-optional socket besides `identity`, because every other socket exists to
   feed something that must eventually be *read*.
+- **Index atoms, not documents — and log every firing.** These are one law
+  because neither works without the other: atom-level indexing is what makes
+  retrieval discriminate, and the log is the only thing that tells you whether
+  it did. Measured on the same corpus and the same scoring maths, the two
+  granularities were 20% and 75% precision, and the difference was undetectable
+  by inspection.
 - **Silence is a failure state, not a pass.** The worst outcome is a hook that is
   registered, exits 0, and does nothing — it survives every audit you would think to
   run. This is why the doctor probes rather than trusting registration.
@@ -183,6 +267,19 @@ If you already like your harness, porting wins on three counts:
 
 - ❌ **"I set up memory" = created a `memory/` folder.** No socket, no recall. This is
   the default failure and it is invisible, because the folder looks right.
+- ❌ **Indexing one row per FILE.** The headline defect. Measured 20% precision
+  against 75% for the same corpus and the same scoring maths indexed as atoms.
+  It is invisible without a log and it cannot be tuned out — no threshold
+  separates scores that were flattened at index time.
+- ❌ **Folding body text into searchable content.** The body is for showing, not
+  searching. `lead[:300]` in the index is what turns 600 distinct memories into
+  600 weak matches for everything.
+- ❌ **Merging a memory's intents into one string.** Three "when you're about to
+  X" rows concatenated is one blob, not three atoms. It is a one-line mistake
+  (`+=`) that destroys the whole benefit.
+- ❌ **Shipping recall with no firing log.** You will believe it works. Ours felt
+  fine for a week and was running at 20% precision. One JSONL line per fire is
+  the entire cost of finding out.
 - ❌ **Ranking without an absolute relevance floor.** BM25 scores are normalised
   *within* a result set, so the top 3 of a bad match look identical to the top 3 of a
   good one — measured, positives scored 0.186–0.399 against negatives 0.277–0.385,

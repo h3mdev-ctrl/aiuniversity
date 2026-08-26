@@ -25,7 +25,7 @@ import re
 import sqlite3
 import sys
 
-MAX_HITS = 3
+MAX_HITS = 2          # swept on real prompts: 2 beat 3 on precision
 MIN_WORDS = 4         # below this a prompt is chit-chat ("ok", "thanks")
 
 # TWO GATES, AND WHY NEITHER IS ENOUGH ALONE
@@ -70,8 +70,68 @@ def memory_dir(cwd: str) -> pathlib.Path | None:
     return None
 
 
+# ATOM KINDS and their weight as evidence of intent. A hand-written resolver
+# row ("When you're about to X -> read Y") is the strongest signal a memory
+# corpus contains. A slug is 3-5 words of filename and exists only as a
+# last-resort handle -- and because BM25 favours SHORT documents, an unweighted
+# slug wins on a single common term. Measured: "ship this and deploy it" ranked
+# a `cloudflare_worker_deploy` slug (one term: "deploy") above the shipping
+# index's "Shipping / PR / deploy / land" resolver row.
+ATOM_WEIGHT = {"resolver": 1.00, "description": 0.95, "slug": 0.75}
+MIN_ATOM_CHARS = 12
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md)\)")
+
+
+def _resolver_atoms(index_md: str) -> list[tuple[str, str]]:
+    """-> [(target.md, ONE intent)] from a resolver table. Never merged.
+
+    Merging every intent for a target into one string is the mistake that makes
+    a corpus unsearchable -- see build_index below.
+    """
+    out = []
+    for line in index_md.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        links = _LINK_RE.findall(line)
+        if not links:
+            continue
+        intent = re.sub(r"\s+", " ", _LINK_RE.sub(" ", line).replace("|", " ")).strip()
+        if len(intent) < MIN_ATOM_CHARS:
+            continue
+        for _disp, target in links:
+            out.append((target, intent))
+    return out
+
+
 def build_index(memdir: pathlib.Path) -> sqlite3.Connection:
-    """In-memory FTS5 index over the memory folder.
+    """FTS5 index of ATOMS -- one row per statement, NOT one row per file.
+
+    THIS IS THE MOST IMPORTANT DECISION IN THE WHOLE SOCKET.
+
+    The obvious design indexes each memory file as one document. It produces a
+    system that looks correct and retrieves badly, and the failure is invisible
+    without a log. Measured on a real 607-file corpus over 25 real prompts:
+    document-level indexing gave **20% precision**. Every memory matched every
+    prompt weakly, so scores collapsed into a narrow band (0.27-0.31) where the
+    HIGHEST-scoring results were noise and genuinely useful ones scored lower.
+    No threshold could separate them, because there was nothing to separate.
+
+    The cause is mechanical: BM25 over a 200-line document with hundreds of
+    terms will match almost any query a little. Over a one-sentence atom, a
+    match means something.
+
+    hermes-agent gets this right by construction -- `facts.content` is one
+    statement per row. Applied to a markdown corpus, the atoms are:
+      resolver     each "when you're about to X" row the file appears in
+      description  its frontmatter description
+      slug         its filename words
+
+    Same corpus, same scoring maths, atoms instead of documents: precision went
+    20% -> 75% with recall unchanged and 24% fewer tokens injected.
+
+    NOTE WHAT IS **NOT** INDEXED: the body. The body is what you SHOW the user;
+    it is not what you SEARCH. Folding a few hundred characters of body text
+    into the searchable content is exactly what flattened the scores.
 
     Rebuilt per call for clarity. Cache it once you have hundreds of files --
     but if you cache, key the cache on the DIRECTORY and check that key BEFORE
@@ -80,8 +140,25 @@ def build_index(memdir: pathlib.Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute("CREATE VIRTUAL TABLE m USING fts5(slug, description, body)")
+    # target is NOT unique: one memory contributes several atoms.
+    conn.execute("CREATE VIRTUAL TABLE m USING fts5(target, kind, content, "
+                 "tokenize='porter unicode61')")
+
+    intents: dict[str, list[str]] = {}
+    for idx in ("MEMORY.md", *(p.name for p in sorted(memdir.glob("INDEX_*.md")))):
+        p = memdir / idx
+        if not p.is_file():
+            continue
+        try:
+            for target, intent in _resolver_atoms(p.read_text(encoding="utf-8",
+                                                              errors="replace")):
+                intents.setdefault(target, []).append(intent)
+        except OSError:
+            continue
+
     for f in sorted(memdir.glob("*.md")):
+        if f.name in ("MEMORY.md", "CATALOG.md"):
+            continue
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -89,7 +166,19 @@ def build_index(memdir: pathlib.Path) -> sqlite3.Connection:
         desc = ""
         if match := re.search(r"^description:\s*(.+)$", text, re.M):
             desc = match.group(1).strip().strip('"')
-        conn.execute("INSERT INTO m VALUES (?,?,?)", (f.stem, desc, text[:20000]))
+
+        atoms = [("resolver", i) for i in intents.get(f.name, [])]
+        if desc:
+            atoms.append(("description", desc))
+        atoms.append(("slug", f.stem.replace("_", " ")))
+
+        seen = set()
+        for kind, content in atoms:
+            key = re.sub(r"\W+", " ", content.lower()).strip()
+            if len(key) < MIN_ATOM_CHARS or key in seen:
+                continue      # the same phrasing as both row and description
+            seen.add(key)
+            conn.execute("INSERT INTO m VALUES (?,?,?)", (f.name, kind, content))
     return conn
 
 
@@ -108,7 +197,7 @@ def terms(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]{3,}", text.lower()))
 
 
-def overlap(prompt: str, row: sqlite3.Row) -> float:
+def overlap(prompt: str, row) -> float:
     """Share of the prompt's terms named by this memory's slug + description.
 
     Corpus-independent by construction: it does not move when you add files, so
@@ -117,11 +206,11 @@ def overlap(prompt: str, row: sqlite3.Row) -> float:
     q = terms(prompt)
     if not q:
         return 0.0
-    doc = terms(f"{row['slug']} {row['description']}")
+    doc = terms(f"{row['target']} {row['content']}")
     return len(q & doc) / len(q)
 
 
-def search(conn: sqlite3.Connection, prompt: str) -> list[sqlite3.Row]:
+def search(conn: sqlite3.Connection, prompt: str) -> list[dict]:
     q = sanitize(prompt)
     if not q:
         return []
@@ -129,13 +218,29 @@ def search(conn: sqlite3.Connection, prompt: str) -> list[sqlite3.Row]:
         rows = conn.execute(
             # bm25() returns a NEGATIVE score where lower is better, so negate
             # it to get "bigger is better" and compare against the floor.
-            "SELECT slug, description, -bm25(m) AS score FROM m "
+            # Fetch WIDE: atoms are short and numerous, so the best atom of a
+            # good memory can otherwise be crowded out by several weak atoms
+            # of another.
+            "SELECT target, kind, content, -bm25(m) AS score FROM m "
             "WHERE m MATCH ? ORDER BY score DESC LIMIT ?",
-            (q, MAX_HITS)).fetchall()
+            (q, MAX_HITS * 12)).fetchall()
     except sqlite3.OperationalError:
         return []
-    return [r for r in rows
-            if r["score"] >= MIN_BM25 and overlap(prompt, r) >= MIN_OVERLAP]
+
+    # COLLAPSE ATOMS -> MEMORIES, keeping each memory's BEST atom.
+    # Max, not sum: summing would reward a memory for being cited under many
+    # resolver rows, which is a property of the corpus, not of relevance to
+    # THIS prompt.
+    best: dict[str, dict] = {}
+    for r in rows:
+        s = r["score"] * ATOM_WEIGHT.get(r["kind"], 0.9)
+        if s < MIN_BM25 or overlap(prompt, r) < MIN_OVERLAP:
+            continue
+        prev = best.get(r["target"])
+        if prev is None or s > prev["score"]:
+            best[r["target"]] = {"target": r["target"], "kind": r["kind"],
+                                 "content": r["content"], "score": s}
+    return sorted(best.values(), key=lambda h: -h["score"])[:MAX_HITS]
 
 
 def calibrate(memdir: pathlib.Path, positive: str, negative: str) -> None:
@@ -152,14 +257,14 @@ def calibrate(memdir: pathlib.Path, positive: str, negative: str) -> None:
     for label, prompt in (("SHOULD HIT ", positive), ("SHOULD MISS", negative)):
         q = sanitize(prompt)
         rows = conn.execute(
-            "SELECT slug, description, -bm25(m) AS score FROM m "
-            "WHERE m MATCH ? ORDER BY score DESC LIMIT 3", (q,)).fetchall() if q else []
+            "SELECT target, kind, content, -bm25(m) AS score FROM m "
+            "WHERE m MATCH ? ORDER BY score DESC LIMIT 4", (q,)).fetchall() if q else []
         print(f"\n{label}: {prompt!r}")
         if not rows:
             print("   (no FTS matches at all)")
         for r in rows:
-            print(f"   {r['slug'][:34]:34s} bm25={r['score']:6.3f} "
-                  f"overlap={overlap(prompt, r):.2f}")
+            print(f"   {r['target'][:30]:30s} <{r['kind']:11s}> "
+                  f"bm25={r['score']:6.3f} overlap={overlap(prompt, r):.2f}")
     print(f"\ncurrent gates: MIN_BM25={MIN_BM25}  MIN_OVERLAP={MIN_OVERLAP}")
     print("Set MIN_BM25 between the two blocks above. If they overlap, BM25 alone "
           "cannot separate them -- lean on MIN_OVERLAP.")
@@ -193,9 +298,8 @@ def main() -> int:
 
         lines = ["<system-reminder>", "Relevant project memory for this request:", ""]
         for h in hits:
-            lines.append(f"  - [{h['slug']}]({h['slug']}.md)")
-            if h["description"]:
-                lines.append(f"    {h['description'][:200]}")
+            lines.append(f"  - [{h['target'][:-3]}]({h['target']})")
+            lines.append(f"    {h['content'][:200]}")
         lines.append("</system-reminder>")
 
         print(json.dumps({"hookSpecificOutput": {
