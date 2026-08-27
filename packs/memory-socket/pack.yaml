@@ -108,6 +108,47 @@ steps:
       and either half alone does nothing useful. Register them on PreCompact and
       PostCompact respectively.
 
+  - id: salvage-survives-rekey
+    instruction: >
+      Prove the SALVAGE chain survives what it exists for. The harness reassigns
+      the session id across a compaction, so a carry file keyed on session id is
+      written under one id and looked up under another -- and the restore hook
+      reports an honest "no carry-forward found", which looks like a benign miss
+      and is actually the feature being dead. Ours had never worked once. Write
+      a carry under one id, read it back under a DIFFERENT one, and demand the
+      content survives.
+    check:
+      type: contains
+      cmd: python packs/memory-socket/files/socket_doctor.py --probe restore
+      expect: "LIVE"
+    on_fail: >
+      Your restore hook returned nothing. If it keys the carry file on
+      session_id, that is the bug -- key on the working directory instead
+      (hashed, so sibling worktrees cannot collide). See
+      files/examples/restore_post_compact.py and the README section
+      "Audit yourself against the whole contract". Do NOT fix this by falling
+      back to "the newest carry file": that leaks another session's notes into
+      this one.
+
+  - id: learning-loop-votes
+    instruction: >
+      Confirm the trust loop actually VOTES. Porting the trust model is easy and
+      wiring a voter is the part that gets skipped -- ours ran for months with
+      607 memories, two distinct trust values and zero votes, which means nothing
+      was ever pruned and every false fire recurred forever. If your store shows
+      one or two trust values across the whole corpus, you have a decoration, not
+      a loop.
+    check:
+      type: command_succeeds
+      cmd: python packs/memory-socket/files/socket_doctor.py --socket salvage
+    on_fail: >
+      This step is a READING step as much as a check: open
+      files/examples/learn_on_compact.py and read the four ways an inferred
+      vote signal lies (benchmark contamination, common-word evidence,
+      corpus-rarity, timezone skew). Then wire a voter at PreCompact, where the
+      firing log and the transcript of what happened next both still exist.
+      Make it timid and reversible before you make it clever.
+
   - id: no-silent-sockets
     instruction: >
       The audit that matters: every socket you have plugged in must actually

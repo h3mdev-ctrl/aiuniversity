@@ -26,7 +26,34 @@ import sqlite3
 import sys
 
 MAX_HITS = 2          # swept on real prompts: 2 beat 3 on precision
-MIN_WORDS = 4         # below this a prompt is chit-chat ("ok", "thanks")
+
+# TRIVIALITY GATE -- ported from hermes-agent
+# `agent/memory_provider.py::TRIVIAL_PROMPT_RE`, which `turn_context.py:1391`
+# consults BEFORE prefetch runs at all.
+#
+# A word-count heuristic ("skip prompts under 4 words") is the obvious version
+# and it is wrong in both directions: it skips "why is CI red?" and admits
+# "ok sure thanks mate". A whitelist anchored to END OF STRING is exact --
+# "ok" is skipped, "ok walk it forwards then for those configs" is not.
+#
+# This is NOT a relevance gate. These turns carry no semantic signal at all, so
+# there is nothing to be relevant to. Relevance is a separate question, answered
+# by the score floors below.
+TRIVIAL_PROMPT_RE = re.compile(
+    r"^(yes|no|ok|okay|sure|thanks|thank you|thx|ta|y|n|yep|nope|yeah|nah|"
+    r"hi|hey|hello|yo|sup|continue|go ahead|go on|do it|proceed|carry on|"
+    r"got it|cool|nice|great|done|next|lgtm|k|perfect|awesome|right|exactly)"
+    r"[\s!?.:;,\"'~‘’“”—–…()\[\]{}<>*&^%$#@!+=` ]*$",
+    re.IGNORECASE,
+)
+
+
+def is_trivial_prompt(text: str) -> bool:
+    """True when a prompt carries no semantic signal worth recalling against."""
+    stripped = (text or "").strip()
+    if not stripped or stripped.startswith("/"):
+        return True          # empty, or a command addressed to the harness
+    return bool(TRIVIAL_PROMPT_RE.match(stripped))
 
 # TWO GATES, AND WHY NEITHER IS ENOUGH ALONE
 # ------------------------------------------
@@ -286,7 +313,7 @@ def main() -> int:
 
         # Cheap prompts get nothing. Firing retrieval on "ok" or "thanks" costs
         # latency and teaches the user the block is noise.
-        if len(prompt.split()) < MIN_WORDS:
+        if is_trivial_prompt(prompt):
             return 0
 
         memdir = memory_dir(cwd)

@@ -181,11 +181,86 @@ you keep the part that matters most and pay nothing.
 | **restore** | `PostCompact` | (read side of the same) | no |
 | **delegate** | `SubagentStop` | `on_delegation` | no |
 | **harvest** | `SessionEnd` | `on_session_end(messages)` | no |
+| **learn** | PreCompact + wrap-up | `fact_feedback` tool + `trust_score` | no |
+
+Two more things are not sockets but decide whether the sockets are worth having:
+the **triviality gate** (`is_trivial_prompt`, so dead turns never reach
+retrieval) and **surviving a session re-key** (there is no `on_session_switch`
+callback here, so persisted state must key on `cwd`). Both are covered above.
 
 Each has a working reference implementation in [`files/examples/`](files/examples/),
 one file per socket. They are deliberately **self-contained** — `memory_dir()`
 repeats across files so any one can be copied on its own — and each carries, in
 comments, the specific defect it cost us to find.
+
+### Audit yourself against the whole contract, not the parts you already built
+
+`MemoryProvider` has **22 methods**. We built six sockets, felt done, and shipped.
+Then read the interface end to end and found two of the misses were live defects,
+not missing features:
+
+| method | what happens without it |
+|---|---|
+| **`on_session_switch`** | fires on `/resume`, `/branch`, `/reset` **and context compression** — any path that reassigns the session id. We had no equivalent, and the salvage socket keyed its carry file on session id. **The salvage→restore chain had never once worked.** |
+| **`is_trivial_prompt`** | every "ok" / "thanks" / "continue" pays the full retrieval path before being rejected on relevance |
+| `queue_prefetch` | recall latency is paid synchronously instead of warmed in the background |
+| `sync_turn` | no per-turn capture; extraction is batch-only |
+| `on_turn_start` | no turn counting or periodic maintenance |
+
+The salvage bug is the instructive one, because of **how** it hid. My restore
+hook printed an honest `"no carry-forward digest was found"` on a miss — which
+looks like a benign empty result and is in fact the feature reporting that it is
+dead. It had been printing that every single time.
+
+The fix is not to catch the switch (Claude Code gives you no such callback) but
+to **key on something that survives it**. `cwd` does: stable across a compaction,
+and different per worktree — so it scopes the lookup without reintroducing the
+"newest file anywhere" fallback that leaks other sessions' notes.
+
+> **How to catch this class yourself:** the evidence was one command away —
+> two transcript files for one continuous conversation, both live as scratchpad
+> paths either side of the compaction. If a socket writes a file and reads it
+> back later, prove the round trip across the event it is meant to survive.
+> A test that writes and reads under the *same* id proves nothing.
+
+### The learning loop: the socket that is easiest to build and never run
+
+Porting the trust *model* is easy — `score = relevance × trust_score`, a
+`min_trust` floor, `+0.05` / `−0.10`. Wiring something that actually **votes** is
+the part that gets skipped. We shipped the model, a `--feedback` CLI, the lot.
+Measured months later on 607 memories: **two distinct trust values, zero votes,
+zero prunes.** Decoration.
+
+It matters because trust is Hermes' answer to "should this memory fire at all".
+Remember it has no per-query relevance gate — it prefetches on every non-trivial
+turn and injects whatever returns. What stops a useless fact reappearing forever
+is that negative votes push it under `min_trust`. No votes, no pruning, and every
+false fire recurs for the life of the corpus.
+
+If you cannot get votes from the model calling a tool, you can infer them — but
+only where both halves of the evidence exist at once: **the log of what fired,
+and the transcript of what happened next.** That is compaction, and nowhere else;
+afterwards the second half is gone.
+
+[`learn_on_compact.py`](files/examples/learn_on_compact.py) is the reference, and
+its docstring lists the four ways that inferred signal lied to us — each cost a
+rewrite:
+
+1. **Benchmark contamination** — a tuning sweep put 82 synthetic firings in the
+   log. Scoring them punishes real memories for being ignored by a "turn" with no
+   conversation attached.
+2. **Common words as evidence** — voted a memory helpful for containing
+   "already", "first", "gate".
+3. **Corpus-rarity ≠ informativeness** — document-frequency filtering looks like
+   the fix, but a technical store makes ordinary English rare, so it scores as
+   distinctive. It voted a memory helpful on the word *"distinctive"*, being used
+   about something else entirely.
+4. **Timezone** — transcript stamps UTC, fire log local. A 10-hour skew misaligned
+   every window, and everything still appeared to work.
+
+Hence: evidence must be **identifier-grade** (`pgrst204`, `bm25`, `memory_recall`),
+positives fire on one such term, negatives need three consecutive ignored firings,
+trust never reaches zero, and every run is journalled and revertible.
 
 ### Why port the sockets instead of adopting Hermes
 
@@ -245,6 +320,15 @@ If you already like your harness, porting wins on three counts:
   it did. Measured on the same corpus and the same scoring maths, the two
   granularities were 20% and 75% precision, and the difference was undetectable
   by inspection.
+- **Prove every round trip across the event it must survive.** A socket that
+  writes state before an event and reads it after must be tested across that
+  event, with the identifiers actually changing. Writing and reading under the
+  same session id proves nothing, and is how a salvage chain shipped that had
+  never worked once.
+- **A loop with no voter is not a loop.** Trust that nothing ever moves is a
+  decoration on the score formula. Either wire a voter — inferred votes are
+  acceptable if they are timid, identifier-grade and reversible — or state
+  plainly that memories are never pruned.
 - **Silence is a failure state, not a pass.** The worst outcome is a hook that is
   registered, exits 0, and does nothing — it survives every audit you would think to
   run. This is why the doctor probes rather than trusting registration.
@@ -267,6 +351,21 @@ If you already like your harness, porting wins on three counts:
 
 - ❌ **"I set up memory" = created a `memory/` folder.** No socket, no recall. This is
   the default failure and it is invisible, because the folder looks right.
+- ❌ **Keying persisted state on the session id.** It is reassigned by
+  compaction, `/resume`, `/branch` and `/reset`. Anything written before the
+  event and read after it will never be found — and an honest "not found"
+  message makes a dead feature look like a quiet miss. Key on `cwd`.
+- ❌ **Auditing yourself against the sockets you already built.** Read the whole
+  interface. Two of our five misses were live defects, not gaps.
+- ❌ **Porting a trust model without wiring a voter.** `score × trust_score` with
+  nothing ever voting is decoration: 607 memories, two trust values, nothing ever
+  pruned. If you cannot vote, do not claim a learning loop.
+- ❌ **Letting an automated writer into a curated store without a revert.** And
+  when you write revert, make it refuse targets a later run has moved — restoring
+  blindly destroys the newer, correct value.
+- ❌ **Skipping trivial turns with a word count.** "under 4 words" drops
+  "why is CI red?" and admits "ok sure thanks mate". Anchor a whitelist to end of
+  string instead.
 - ❌ **Indexing one row per FILE.** The headline defect. Measured 20% precision
   against 75% for the same corpus and the same scoring maths indexed as atoms.
   It is invisible without a log and it cannot be tuned out — no threshold
