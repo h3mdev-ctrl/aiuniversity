@@ -51,6 +51,32 @@ steps:
       The recon guard didn't block a known-forbidden action. Reinstall:
         python packs/guardrails/files/setup_recon_build_guard.py
 
+  - id: hook-liveness
+    instruction: >
+      Install the hook doctor and confirm every hook you have registered is
+      actually ALIVE. This is the step people skip, and it is the one that pays
+      off most over time: a hook that crashes and a hook with nothing to say look
+      IDENTICAL from the outside -- both are silent. For PreToolUse an unexpected
+      exit is treated as a NON-BLOCKING error, so the tool call proceeds
+      UNGUARDED while everything still looks normal. The doctor feeds each
+      registered hook a deliberately benign payload for its event and fails if it
+      crashes or returns anything other than allow/block.
+    check:
+      type: contains
+      cmd: python packs/hooks/files/hook_doctor.py
+      expect: "VERDICT: HEALTHY"
+    on_fail: >
+      At least one registered hook is BROKEN -- the report names the hook and the
+      error. Usual causes: (a) the file moved or was renamed but settings.json
+      still points at the old path; (b) a half-applied edit left it uncompilable;
+      (c) an edit changed a data structure the dispatch loop reads without
+      updating the loop -- e.g. adding a callable matcher to a list the loop still
+      calls `.search()` on, which raises AttributeError on EVERY call and silently
+      disables the entire hook. Fix the named hook, then re-run.
+      Run this after ANY hook edit and at every wrap-up. On the machine this came
+      from, two hooks were dead at the same time for a full day and both were
+      found by accident, not by anything reporting them.
+
   - id: session-end
     instruction: >
       Session-end guard: a Stop hook that fires whenever Claude's response contains

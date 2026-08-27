@@ -14,10 +14,31 @@
 # are environment facts, so a check reports the state and the on_fail hands over
 # the exact, proven workaround.
 #
-# Two more traps have no clean universal check (they depend on files this pack
-# can't assume exist) -- they're documented, not gated: the Claude Code plugin
-# ${CLAUDE_PLUGIN_ROOT} cwd bug, and the 260-char MAX_PATH limit. See
-# files/windows_gotchas.md for both, plus the write-a-config-without-a-BOM helper.
+# Some traps have no honest check -- they are CODE PATTERNS or facts about the
+# user's shell, not environment state a command can interrogate. Gating them
+# would mean inverted checks ("pass when this fails"), which read backwards to a
+# learner and pass meaninglessly on a different shell. They are documented, not
+# gated, in files/windows_gotchas.md:
+#
+#   1. Claude Code plugin ${CLAUDE_PLUGIN_ROOT} cwd bug
+#   2. 260-char MAX_PATH limit
+#   5. PowerShell 5.1 parser traps in blocks you hand the user:
+#      `&&` and `<` are hard parser errors; `~/path` is passed LITERALLY to a
+#      native exe (no error -- just a nonsense path with a `~` segment in it)
+#   6. subprocess(text=True) with no encoding= -> cp1252 in the writer thread,
+#      child hangs with no stdin. (The python-utf8 step below already removes
+#      this at the environment level; the note covers code that must be portable.)
+#   7. sys.stdout.reconfigure() unguarded -> AttributeError off a real console
+#   8. cwd IS the python import path -- `cd subdir && python -c "import pkg"`
+#      raises ModuleNotFoundError and blames a dependency that was never missing
+#   9. heredocs mangle python string literals (\n splits it; C:\ paths raise
+#      'unicodeescape')
+#  10. shutil.copy2 preserves mtime, so `ls -t` misorders your .bak files
+#
+# 5-10 were measured on a live machine (441 sessions, 46,857 tool calls), not
+# imagined. Enforcement for the code patterns lives in the `hooks` pack -- a
+# rule with no attachment point at the moment of the mistake does not fire.
+# Plus the write-a-config-without-a-BOM helper.
 name: windows-shell
 version: 0.1.0
 steps:
