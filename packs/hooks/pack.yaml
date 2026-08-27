@@ -11,6 +11,21 @@
 #
 # Run guardrails first (foundation layer-3 does this).
 # Then install whichever hooks fit your workflow.
+#
+# BEFORE YOU WRITE OR EDIT A GUARD: read files/GUARD_DESIGN.md. Six rules, each
+# paid for with a real defect on a live machine (~30 hooks, 46,857 tool calls,
+# 441 sessions) inside a single day. The two that cost most:
+#
+#   * A broken guard and a quiet guard look IDENTICAL. PreToolUse treats an
+#     unexpected exit as a NON-BLOCKING error, so a crashed guard PERMITS while
+#     everything still looks fine. One crashed on every call for a day.
+#   * Narrow a guard, never blind it -- and pin the narrowing with a POSITIVE
+#     control. A fix for a cosmetic false positive taught a guard to ignore
+#     heredoc bodies, which opened a bypass letting `python - <<PY` rewrite any
+#     hook. The tests passed: they pinned the annoyance and never pinned the
+#     attack.
+#
+# The `hook-liveness` step below is rule 1 made runnable.
 name: hooks
 version: 0.1.0
 steps:

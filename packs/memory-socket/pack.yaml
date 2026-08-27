@@ -129,6 +129,25 @@ steps:
       "Audit yourself against the whole contract". Do NOT fix this by falling
       back to "the newest carry file": that leaks another session's notes into
       this one.
+      .
+      CWD IS THE RIGHT LOOKUP KEY, BUT DO NOT *MERGE* ACROSS IT (added
+      2026-08-28). A cwd key matches every session that ever ran at that path,
+      so folding the previous carry INTO the new digest cross-contaminates two
+      conversations -- and it needs no overlap at all:
+      session A compacts at 10:00 and writes the carry; session B compacts at
+      11:00, reads it, and merges A's lines in under the header "established
+      facts of THIS session". Both are recent, so a staleness TTL does not catch
+      it, and two sessions in one worktree an hour apart is an ordinary day.
+      .
+      Carry by REFERENCE, not by absorption: write each window's digest to the
+      SESSION's own scratchpad (keyed by session id, therefore unique by
+      construction) and have the carry NAME the previous window's path instead of
+      inlining it. You lose inline iterative re-compression -- earlier windows
+      are one hop back down the chain rather than restated -- and you gain the
+      guarantee that another conversation's content can never appear in yours. A
+      correct pointer beats a convenient lie. If a pointer ever does come from
+      another session you get a clearly-labelled path you can ignore, rather than
+      silent content in your context.
 
   - id: learning-loop-votes
     instruction: >
