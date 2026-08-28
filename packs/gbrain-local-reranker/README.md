@@ -11,11 +11,15 @@ no signal anywhere a normal session would look.
 
 This is a **follow-on pack**, not part of `gbrain-windows` core: it needs an
 external multi-GB download, a second long-lived local server with its own
-lifecycle, and a GPU for good performance. Run `gbrain-windows` first.
+lifecycle, and **a GPU — required for interactive use, not just "for good
+performance."** Confirmed on a second install (CPU-only, integrated graphics):
+a realistic candidate pool simply doesn't complete within 3 minutes, at any
+model size. If you don't have a free NVIDIA GPU, skip this pack. Run
+`gbrain-windows` first either way.
 
 See [pack-structure.md](../../docs/pack-structure.md) for the section
 conventions, and [files/windows_local_stack_gotchas.md](files/windows_local_stack_gotchas.md)
-for the 10 real traps hit standing this up — read it first if Ollama also runs
+for the 11 real traps hit standing this up — read it first if Ollama also runs
 on this box. **The one that actually mattered (Trap 2b):** llama-server clamps
 its batch size to 512 tokens by default. A synthetic test with 2-3 short
 sentences never gets close to that limit and looks perfect; every real query
@@ -72,6 +76,15 @@ except the fail-open audit log.
   before failing deep into model init.
 - **This is a long-lived daemon — give it its own directory, never a git
   worktree.** Worktrees get deleted out from under running processes.
+- **Pull the GGUF from a named, verified repo — "search HuggingFace for a
+  Qwen3-Reranker conversion" is not safe generic guidance.** A popular
+  auto-conversion (`mradermacher/Qwen3-Reranker-4B-GGUF`) is missing its
+  classifier-head tensor and produces near-zero, order-scrambled scores that
+  look like a config bug but are a broken file (Trap 10).
+- **CPU-only is not a slower fallback — it's not viable for a real candidate
+  pool.** Verified: 25 realistic-length documents didn't complete reranking
+  within 3 minutes at any model size tried, on CPU (Trap 11). Don't set up
+  this pack expecting CPU to "just be slower."
 
 ## Anti-Patterns
 
@@ -100,6 +113,14 @@ except the fail-open audit log.
   the actual cause was a llama-server launch flag, visible the whole time in
   `~/.gbrain/audit/rerank-failures-*.jsonl`. Exhaust the tool's own
   diagnostics before reading a dependency's internals.
+- ❌ **Debugging "near-zero, scrambled scores" as a pooling or config problem
+  before checking which GGUF repo you pulled.** That exact symptom (irrelevant
+  document outscoring the relevant one, both scores ~1e-25) is Trap 10's
+  signature — a specific popular repo missing its classifier head — not
+  something a config change fixes.
+- ❌ **Setting this pack up on a CPU-only machine expecting "slower but
+  usable."** It isn't, for a real candidate pool (Trap 11) — check for a free
+  NVIDIA GPU before starting, not after.
 
 ## Related packs
 

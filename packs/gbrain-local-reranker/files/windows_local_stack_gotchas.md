@@ -191,3 +191,52 @@ Prebuilt llama.cpp releases often ship both an older (12.x) and a newer
 if it exceeds what your driver reports, prefer the older, more broadly
 compatible CUDA build line. Verified: `cuda-12.4-x64` loaded and ran cleanly
 on a driver reporting CUDA 13.2 support.
+
+## Trap 10: "pull a community GGUF conversion" is not safe generic guidance — one specific popular repo is silently broken
+
+Found on a second install (2026-08-28, different machine, CPU-only). The
+`mradermacher/Qwen3-Reranker-4B-GGUF` repo — a "static quants" automatic
+conversion, one of the first results for a generic "Qwen3 Reranker GGUF"
+search — is missing the `cls.output.weight` tensor: the actual yes/no
+classifier head Qwen3-Reranker needs to produce a meaningful score at all.
+
+**Symptom:** the server answers HTTP 200, `gbrain models doctor` shows it
+reachable, but scores are near-zero and effectively random — measured: the
+*irrelevant* document outscored the relevant one, both around `1e-25`. This
+LOOKS like a pooling/config bug (wrong pooling head, tokenizer mismatch) but
+is actually a broken source file — confirmed against a known upstream issue,
+[ggml-org/llama.cpp#16407](https://github.com/ggml-org/llama.cpp/issues/16407).
+
+**Fix — use a conversion confirmed to include the classifier head.** Two
+repos exist specifically because of this failure mode (their own READMEs
+name it):
+- 4B: `huggingface.co/gscoppino/Qwen3-Reranker-4B-GGUF-llama_cpp`
+- 0.6B: `huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp`
+
+Verified working (relevant=0.9869–0.9999 vs irrelevant<0.0001, both model
+sizes). If you already have a GGUF from a different repo and see near-zero,
+order-scrambled scores, don't debug pooling config first — switch the model
+file.
+
+## Trap 11: CPU-only is not a slower fallback for real candidate pools — it's not viable at all
+
+The original guidance in this pack ("much slower on first call, 8-15s cold
+start vs <1s on GPU") was measured against a tiny synthetic test and never
+validated against a real gbrain candidate pool. Corrected 2026-08-28 on a
+CPU-only machine (Intel integrated graphics, no NVIDIA card), using the
+Trap 10 fixed GGUFs so this isn't the broken-file symptom:
+
+25 candidates at realistic gbrain chunk length (~800 tokens/doc) **did not
+complete within 3 minutes**, at either model size (4B or 0.6B). 25 SHORT
+synthetic docs (~150 tokens each) completed in 29.5s on the 0.6B model — the
+same 25 docs at realistic length again exceeded 180s. **Token volume, not
+document count, drives the cost, and it scales worse than linearly**
+(5.3× more tokens produced at least 6×+ more elapsed time before the test
+was stopped — consistent with quadratic attention cost inside one batched
+rerank call).
+
+**If you don't have an NVIDIA GPU with free VRAM, skip this pack entirely.**
+Raising `search.reranker.timeout_ms` or shrinking `search.reranker.top_n_in`
+buys some headroom but does not fix the underlying throughput gap — a local
+CPU reranker will make gbrain feel broken (queries that never return) rather
+than merely slow.

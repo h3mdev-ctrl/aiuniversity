@@ -19,11 +19,19 @@
 #
 # WHAT YOU NEED: an NVIDIA GPU with 4GB+ free VRAM (a 4B Q4_K_M reranker fits
 # in ~2.5GB), `curl`, and about 3GB of disk for the GGUF + llama-server binary.
-# CPU-only works too (see files/windows_local_stack_gotchas.md) but is much
-# slower on first call (8-15s cold start vs <1s on GPU).
+# GPU IS REQUIRED FOR INTERACTIVE USE -- CPU-only is NOT a viable fallback,
+# not just a slower one. Corrected 2026-08-28 after a second install (CPU-only,
+# integrated graphics, no NVIDIA card) measured a realistic 25-doc candidate
+# pool (~800 tokens/doc, matching real gbrain chunk length) failing to complete
+# within 3 minutes, at EVERY model size tried (4B and 0.6B both). Latency
+# scales worse than linearly with token volume (looked quadratic), not just
+# doc count -- the original "8-15s cold start" framing came from a tiny
+# synthetic test and never held for a real candidate pool. If you don't have a
+# GPU, skip this pack; a local CPU reranker will make gbrain feel broken, not
+# just slow.
 #
 # WINDOWS GOTCHAS: read files/windows_local_stack_gotchas.md before you start
-# if you're also running Ollama on the same box -- it covers 10 real traps hit
+# if you're also running Ollama on the same box -- it covers 11 real traps hit
 # standing this up. THE ONE THAT MATTERS MOST (Trap 2b): llama-server clamps
 # its batch size to 512 tokens by default, which a synthetic few-sentence test
 # never hits but every real query does (20-30 real chunks easily exceeds it) --
@@ -35,7 +43,9 @@
 # unconfigured server, an Ollama-internal llama-server.exe surviving as an
 # orphan after its parent dies, VRAM/context tradeoffs from OLLAMA_NUM_PARALLEL,
 # a cold-start throughput trap, flaky multi-GB HuggingFace downloads that fail
-# silently mid-transfer, and picking the right CUDA build for your driver.
+# silently mid-transfer, picking the right CUDA build for your driver, a
+# popular-but-broken community GGUF conversion, and why CPU-only isn't a
+# viable fallback for real candidate pools.
 #
 # LONG-LIVED SERVER: llama-server is a daemon, not a one-shot command. Give it
 # its own durable directory (NOT a git worktree -- worktrees get deleted out
@@ -60,8 +70,13 @@ steps:
          number to what `nvidia-smi` reports your driver supports -- see Trap 9
          in windows_local_stack_gotchas.md, the newest build is not always the
          right pick). Extract it into its own durable directory.
-      2. Download a reranker GGUF (Qwen3-Reranker-4B, Q4_K_M quant is the
-         sweet spot) using the verified-resume download loop in Trap 8 of
+      2. Download a reranker GGUF from ONE OF THESE TWO SPECIFIC REPOS (not a
+         generic "search HuggingFace for a Qwen3-Reranker GGUF" -- see Trap 10
+         in windows_local_stack_gotchas.md for why that generic guidance broke
+         a real install):
+         - 4B: huggingface.co/gscoppino/Qwen3-Reranker-4B-GGUF-llama_cpp
+         - 0.6B: huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp
+         Use the verified-resume download loop in Trap 8 of
          windows_local_stack_gotchas.md -- a plain `curl` can silently
          truncate a multi-GB file.
       3. Launch it with the FULL corrected flag set (Trap 2b -- the batch-size
@@ -107,8 +122,11 @@ steps:
          --embeddings mode instead of --reranking (mutually exclusive), or your
          llama.cpp build is old enough to only serve /rerank, not /v1/rerank
          (this recipe requires /v1/rerank -- update llama-server).
-      2. Cold-start timeout -- first call after a server restart on CPU can take
-         8-15s. Raise the ceiling: gbrain config set search.reranker.timeout_ms 60000
+      2. Cold-start timeout on CPU -- but see the WHAT YOU NEED note above
+         first: CPU-only doesn't just have a longer cold start, real candidate
+         pools can fail to complete at all (Trap 11 in windows_local_stack_gotchas.md). Raising the timeout
+         (gbrain config set search.reranker.timeout_ms 60000) buys headroom
+         but is not a fix for the underlying CPU-throughput problem.
 
   - id: actually-reranks
     instruction: >
@@ -124,12 +142,14 @@ steps:
       cmd: python packs/gbrain-local-reranker/files/verify_rerank_quality.py
     on_fail: >
       The server answers but isn't discriminating relevant from irrelevant
-      documents. Re-check the GGUF's integrity first (Trap 8 -- a truncated
-      download can still partially load): re-verify its byte count against the
-      HuggingFace repo's declared Content-Length and re-download if it doesn't
-      match exactly. If the file is confirmed intact, try a different quant
-      level from the same repo (Q4_K_M is the default recommendation, but a
-      bad quantization or a wrong repo conversion can under-perform).
+      documents -- both scores near-zero and/or the irrelevant document
+      OUTSCORING the relevant one is the specific signature of Trap 10 (a GGUF
+      missing the cls.output.weight classifier-head tensor), NOT a
+      pooling/config bug -- switch to one of the two named-repo GGUFs above
+      before debugging anything else. If you're already on one of those repos,
+      re-check the GGUF's integrity (Trap 8 -- a truncated download can still
+      partially load): re-verify its byte count against the HuggingFace repo's
+      declared Content-Length and re-download if it doesn't match exactly.
 
   - id: verify-in-real-usage
     instruction: >
