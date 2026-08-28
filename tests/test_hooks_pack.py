@@ -161,6 +161,73 @@ def test_selftest_delegation_runs_for_the_recon_guard(tmp_path):
     assert sel and all(c["status"] == "pass" for c in sel), sel
 
 
+# --- the recon guard's scratch + recon-evidence conditions ------------------
+
+
+def _recon_pipe(home: Path, payload: dict, selftest: bool):
+    env = dict(os.environ, CLAUDE_HOME=str(home))
+    if selftest:
+        env["CLAUDE_RECON_SELFTEST"] = "1"
+    else:
+        env.pop("CLAUDE_RECON_SELFTEST", None)
+    return subprocess.run(
+        [sys.executable, str(home / "hooks" / "recon_before_build_guard.py")],
+        input=json.dumps(payload), capture_output=True, text=True, env=env,
+        encoding="utf-8", errors="replace").returncode
+
+
+def _populated_repo(root: Path) -> Path:
+    repo = root / "proj"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "extract.py").write_text("# a\n", encoding="utf-8")
+    (repo / "reconcile.py").write_text("# b\n", encoding="utf-8")
+    return repo
+
+
+def test_selftest_flag_can_only_make_the_guard_fire_more(tmp_path):
+    """CLAUDE_RECON_SELFTEST disables the OS-temp exclusion so a fixture can be
+    built at all. Pin the direction: with the flag ON the guard BLOCKS, with it
+    OFF the same payload is allowed. A flag that made it fire LESS would be a
+    bypass, and this is the test that would catch one appearing."""
+    run(GUARDRAILS / "setup_recon_build_guard.py", home=tmp_path)
+    repo = _populated_repo(tmp_path)            # tmp_path IS under the OS temp tree
+    payload = {"session_id": "s-1", "tool_name": "Write", "transcript_path": "",
+               "tool_input": {"file_path": str(repo / "brand_new.py"), "content": "x"}}
+    assert _recon_pipe(tmp_path, payload, selftest=False) == 0
+    payload["session_id"] = "s-2"               # fresh: nudge-once must not explain it
+    assert _recon_pipe(tmp_path, payload, selftest=True) == 2
+
+
+def test_recon_evidence_in_the_transcript_silences_the_nudge(tmp_path):
+    run(GUARDRAILS / "setup_recon_build_guard.py", home=tmp_path)
+    repo = _populated_repo(tmp_path)
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(json.dumps({"message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": str(repo)}}]}}) + "\n",
+        encoding="utf-8")
+
+    def payload(sess, tp):
+        return {"session_id": sess, "tool_name": "Write", "transcript_path": tp,
+                "tool_input": {"file_path": str(repo / f"new_{sess}.py"), "content": "x"}}
+
+    # Control first: without the transcript the same shape DOES nudge, so the
+    # silence below is attributable to the evidence and not to something else.
+    assert _recon_pipe(tmp_path, payload("s-none", ""), selftest=True) == 2
+    assert _recon_pipe(tmp_path, payload("s-read", str(transcript)), selftest=True) == 0
+
+
+def test_scratch_directories_are_excluded(tmp_path):
+    run(GUARDRAILS / "setup_recon_build_guard.py", home=tmp_path)
+    repo = _populated_repo(tmp_path)
+    scratch = repo / "scratchpad"
+    scratch.mkdir()
+    (scratch / "a.py").write_text("# a\n", encoding="utf-8")
+    (scratch / "b.py").write_text("# b\n", encoding="utf-8")
+    payload = {"session_id": "s-scr", "tool_name": "Write", "transcript_path": "",
+               "tool_input": {"file_path": str(scratch / "probe.py"), "content": "x"}}
+    assert _recon_pipe(tmp_path, payload, selftest=True) == 0
+
+
 # --- the windows guard itself ----------------------------------------------
 
 

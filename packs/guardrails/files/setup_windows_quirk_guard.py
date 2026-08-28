@@ -45,14 +45,17 @@ def _install_hook_file() -> bool:
     (base_dir() / "hooks").mkdir(parents=True, exist_ok=True)
     src = pathlib.Path(__file__).resolve().parent / HOOK_NAME
     dst = hook_path()
-    if dst.exists():
-        return False
+    # Always refresh, and report only a genuinely NEW install. A framework guard
+    # gets revised, and an installer that skips an existing file leaves the user
+    # pinned to whatever they first installed with no upgrade path -- exactly the
+    # drift that made a shipped selftest disagree with a live hook.
+    existed = dst.exists()
     shutil.copyfile(src, dst)
     try:
         os.chmod(dst, 0o755)
     except Exception:
         pass
-    return True
+    return not existed
 
 
 def _registered(entries: list) -> bool:

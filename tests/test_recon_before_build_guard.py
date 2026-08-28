@@ -28,8 +28,22 @@ def _payload(fp, session="s1"):
             "tool_input": {"file_path": str(fp), "content": "x"}}
 
 
-def _pipe(payload, home):
+def _pipe(payload, home, selftest=True):
+    """CLAUDE_RECON_SELFTEST disables the guard's OS-temp-tree exclusion.
+
+    pytest's `tmp_path` lives under the OS temp tree -- the exact directory class
+    the guard learned to ignore, because 86 of 246 measured fires were pointless
+    nudges at the session scratchpad. Without the flag every fixture here looks
+    like a scratch dir, the guard correctly says nothing, and the whole file
+    passes while testing nothing. `test_selftest_flag_can_only_make_the_guard_
+    fire_more` in test_hooks_pack.py pins the direction so this cannot become a
+    bypass.
+    """
     env = dict(os.environ, CLAUDE_HOME=str(home))
+    if selftest:
+        env["CLAUDE_RECON_SELFTEST"] = "1"
+    else:
+        env.pop("CLAUDE_RECON_SELFTEST", None)
     return subprocess.run([sys.executable, str(FILES / "recon_before_build_guard.py")],
                           input=json.dumps(payload), capture_output=True, text=True,
                           env=env, encoding="utf-8")

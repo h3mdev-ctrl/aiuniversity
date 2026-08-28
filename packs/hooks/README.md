@@ -16,6 +16,23 @@ Write in a session would create a **new source file** in a repo that already has
 It exits non-zero with a nudge to read the neighbouring files before building a
 parallel version of them. Fires once per session per repo, then gets out of the way.
 
+Two conditions keep it honest, both added after partitioning **246 measured fires
+across 156 sessions** — a partition an aggregate hit-rate could never have shown:
+
+- **Scratch and temp directories are excluded.** 93 of 246 (38%) targeted a throwaway
+  dir, 86 of them the session scratchpad the system prompt *tells* Claude to use. "Grep
+  the neighbours first" is meaningless advice about a throwaway script, and a guard that
+  bounces you for following your own instructions trains you to dismiss it — which costs
+  it authority on the 62% that matter.
+- **Recon evidence silences it.** The remaining 153 weren't measuring the behaviour at
+  all: the guard fired on the Write regardless of whether recon had happened, so its
+  "hit rate" was really "how often does Claude create a new source file", which for an
+  active builder should be *often*. It could never trend to zero, **and a metric that
+  cannot improve cannot be managed.** It now reads the session transcript and stays
+  silent if this session already Read/Grep/Glob'd inside the target directory. A fire
+  now means something falsifiable: a new source file went into an established directory
+  this session has never looked at.
+
 > The motivating case: a Claude re-derived a whole subset-sum matcher that already
 > lived ~40 lines away in the same folder, over hours, because it never read the file
 > — then wrote a memory titled "read existing code first" and *still* had to be asked

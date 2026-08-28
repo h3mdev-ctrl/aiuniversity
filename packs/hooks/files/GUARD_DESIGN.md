@@ -94,6 +94,16 @@ matching. Newer guards had not inherited the lesson.
 would mine approval history for an allowlist. Never auto-apply; propose, and
 never propose loosening a destructive class.
 
+**And partition the fires before you read the rate.** The recon-before-build guard
+had 246 fires across 156 sessions. As one number that says "busy", and busy is
+ambiguous. Split by target directory and two separate problems fall out: 93 (38%)
+were aimed at throwaway dirs — 86 of them the session scratchpad the system prompt
+*instructs* Claude to use — and the remaining 153 fired whether or not the recon
+had actually happened, because the guard had no way to know. So its "hit rate" was
+really "how often does someone create a new source file", which for an active
+builder should be often. **It could never trend to zero, and a metric that cannot
+improve cannot be managed.** Both fixes came from the partition, not the total.
+
 ---
 
 ## 4. Fail closed only where a failure is irreversible

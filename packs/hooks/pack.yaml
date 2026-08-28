@@ -56,9 +56,17 @@ steps:
   - id: recon-before-build-fires
     instruction: >
       Prove the recon guard actually fires -- pipe a simulated first-Write-of-a-new-
-      file through the installed hook and confirm it exits non-zero with a BLOCKED
-      message. Also confirm that overwriting an existing file still passes (so it's
-      a real gate, not a wall).
+      file through the installed hook and confirm it exits 2. Also confirm the
+      near-misses still pass, so it is a real gate and not a wall: an existing-file
+      overwrite, a doc file, a fresh/sparse dir, a scratch/throwaway dir, and a
+      session that has ALREADY read something in the target directory.
+
+      The fixture needs a fake populated repo, and `tempfile` puts it in the OS temp
+      tree -- which this guard deliberately ignores, because 86 of 246 measured fires
+      were pointless nudges at the session scratchpad. The check therefore sets
+      CLAUDE_RECON_SELFTEST, which disables THAT exclusion and nothing else. Note the
+      direction: it can only make the guard fire MORE, so it is not a bypass, and one
+      case runs with it OFF to prove the exclusion it disables is real.
     check:
       type: command_succeeds
       cmd: python packs/guardrails/files/setup_recon_build_guard.py --test-blocking
