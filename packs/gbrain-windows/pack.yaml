@@ -56,10 +56,17 @@
 # + prescribed fixes for: a WEDGED job queue / crashed supervisor (restart it
 # DETACHED FROM GIT-BASH, not PowerShell -- the /tmp/.gbrain home trap), the
 # session-mode connection pool EMAXCONNSESSION limit (do NOT switch to the
-# transaction pooler -- it breaks gbrain's session-scoped job locks), and stale
+# transaction pooler -- it breaks gbrain's session-scoped job locks; includes a
+# concrete PowerShell snippet for finding stale `gbrain serve` instances from
+# old sessions and orphaned workers left by a crashed supervisor), stale
 # `<head>` sync_failures that no `sync --skip-failed`/`--retry-failed` clears (ack
-# them directly in ~/.gbrain/sync-failures.jsonl). The matching resolver rows that
-# make this manual discoverable from a plain-English symptom are in
+# them directly in ~/.gbrain/sync-failures.jsonl), the `search` vs `query` CLI
+# verb trap (only `query` fires the reranker -- `search` never does, regardless
+# of config), and the undocumented `gbrain reindex --workers N` flag (not in
+# `--help`, default 1, idempotent to kill/restart, diminishing returns if your
+# Ollama embedding backend serializes -- see `OLLAMA_NUM_PARALLEL`). The
+# matching resolver rows that make this manual discoverable from a plain-English
+# symptom are in
 # files/example_gbrain_ops_resolver.md (the operational sibling of
 # example_brain_filing.md).
 name: gbrain-windows
