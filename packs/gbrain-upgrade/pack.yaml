@@ -1,0 +1,125 @@
+# gbrain-upgrade -- safely upgrade gbrain to the latest release without a
+# silently half-migrated database or a wedged supervisor.
+#
+# SKIP THIS PACK IF: you're already current (`gbrain check-update` says so), or
+# you're on a version pinned deliberately for compatibility reasons -- this pack
+# doesn't argue you should always be on the newest version, it just makes the
+# jump safe when you decide to take it.
+#
+# WHY THIS EXISTS: verified 2026-08-28, upgrading gbrain 66+ commits / 16 schema
+# migrations in one jump (v0.45.18.0 -> v0.47.3.0, schema v128 -> v144). The
+# built-in `gbrain upgrade` command's bundled schema migration stopped partway
+# through (11 of 16 migrations applied) with NO error message reaching the
+# terminal -- `gbrain --version` already reported the new CLI version, which
+# looks like success but says nothing about whether the DATABASE actually
+# finished migrating. A stale worker process left running during the upgrade
+# also corrupted its own job queue's bookkeeping, requiring a second cleanup
+# pass after the upgrade "succeeded."
+name: gbrain-upgrade
+version: 0.1.0
+steps:
+  - id: update-available-confirmed
+    instruction: >
+      Confirm there's actually a newer version before doing anything -- avoids
+      an unnecessary upgrade cycle.
+    check:
+      type: contains
+      cmd: gbrain check-update --json
+      expect: "update_available"
+    on_fail: >
+      If check-update reports no update available, stop here -- nothing to do.
+      If the command itself fails, your network or the update-check endpoint
+      may be unreachable; that's a separate problem from this pack.
+
+  - id: processes-stopped-first
+    instruction: >
+      Stop the jobs supervisor AND verify its worker child actually died --
+      supervisor stop does not reliably kill it (same orphaning pattern as
+      `gbrain serve`). A running worker mid-upgrade can write stale data that
+      corrupts its own queue's post-upgrade bookkeeping.
+    check:
+      type: command_succeeds
+      cmd: gbrain jobs supervisor status
+    on_fail: |
+      gbrain jobs supervisor stop
+      # then verify no worker child survived -- on Windows:
+      #   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match
+      #     'jobs work' } | Select-Object ProcessId, CommandLine
+      # kill any survivor explicitly by PID before proceeding.
+
+  - id: upgrade-run
+    instruction: >
+      Run the built-in self-update. On a bun-link/source-clone install this
+      does git pull + bun install + the bundled schema migrations in the
+      right order automatically.
+    check:
+      type: command_succeeds
+      cmd: gbrain --version
+    on_fail: >
+      gbrain upgrade
+      If this command itself is unavailable or broken, fall back to a manual
+      git pull + bun install + bun run build in the source clone -- but prefer
+      the built-in command first, it now handles ordering correctly.
+
+  - id: schema-migration-verified-not-assumed
+    instruction: >
+      THE step that matters most. `gbrain --version` reporting the new CLI
+      version is NOT proof the database schema finished migrating -- verified
+      this session, a real upgrade's bundled migration stopped 11/16 through
+      with no error surfaced anywhere the terminal would show.
+    check:
+      type: regex
+      cmd: gbrain apply-migrations --list
+      expect: "schema v(\\d+) \\(latest \\1\\)"
+    on_fail: |
+      "Database: connected, schema vN (latest M)" where N < M means the schema
+      did NOT finish migrating despite the CLI reporting the new version. Fix:
+      cd <your gbrain source clone>
+      bun run scripts/postinstall.ts
+      This is idempotent -- it only applies what's still pending. Re-check with
+      `gbrain apply-migrations --list` until it reports "All migrations up to
+      date" or the regex above passes.
+
+  - id: config-overrides-survived
+    instruction: >
+      A bundled migration can silently change a config DEFAULT for any setting
+      you never explicitly overrode. If you have explicit overrides (a custom
+      reranker, a custom embedding provider, anything non-default), verify they
+      survived -- don't assume from the changelog prose alone.
+    check:
+      type: command_succeeds
+      cmd: gbrain config show
+    on_fail: >
+      Compare your known explicit overrides (reranker model, embedding model,
+      any custom provider_base_urls) against what `gbrain config show` /
+      `gbrain config get <key>` reports post-upgrade. If something reverted to
+      a new default you didn't choose, re-set it explicitly -- config
+      overrides you've set are supposed to win over bundled migrations that
+      only touch UNSET defaults, but verify this held for YOUR specific keys.
+
+  - id: supervisor-restarted
+    instruction: >
+      Bring the jobs supervisor back up if you stopped it for the upgrade.
+    check:
+      type: command_succeeds
+      cmd: gbrain jobs supervisor status
+    on_fail: |
+      gbrain jobs supervisor start --detach
+      # from git-bash/POSIX shell, not PowerShell (HOME resolves wrong there)
+
+  - id: doctor-clean-or-explained
+    instruction: >
+      Run a full health check post-upgrade and compare against a pre-upgrade
+      snapshot if you took one. New WARN/FAIL rows after an upgrade are worth
+      reading even if they're not blocking -- they can point at exactly the
+      kind of silent config drift this pack exists to catch.
+    check:
+      type: contains
+      cmd: gbrain doctor
+      expect: "GBrain Health Check"
+    on_fail: >
+      gbrain doctor exits non-zero on MOST real brains (it surfaces routine
+      maintenance items, not just upgrade regressions) -- this step only
+      confirms the report actually ran, it deliberately does not gate on the
+      exit code. Read the printed output yourself; focus on anything mentioning
+      your embedding/reranker provider, schema version, or the job queue.

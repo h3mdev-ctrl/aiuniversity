@@ -99,6 +99,19 @@ near the ceiling. A burst (like the cancel loop above) tips it over.
 > `cat` it. The port/mode question rarely needs the file; the error text already
 > tells you it's session mode.
 
+> ⚠️ **Self-kill trap when composing the "find and kill duplicate `gbrain
+> serve`" command above.** A `Get-CimInstance Win32_Process | Where-Object {
+> $_.CommandLine -match 'gbrain serve' -or $_.CommandLine -match 'jobs work' }`
+> filter matches its own literal text — if that PowerShell call is itself
+> invoked through a nested bash/cmd wrapper (routine when an agent's own
+> tool-call plumbing does this), the wrapper's CommandLine contains those same
+> strings and gets matched too. Verified live: one such filter killed 3
+> ancestor bash shells and the PowerShell process itself mid-execution (exit
+> code 255, garbled/truncated output). **Before piping a CommandLine-match
+> filter into `Stop-Process`, walk your own process's ancestor chain first and
+> refuse to kill anything in it** — don't assume a short match string is
+> "obviously" scoped to unrelated processes.
+
 ---
 
 ## Symptom: `gbrain doctor` shows N unacknowledged sync_failures that won't clear

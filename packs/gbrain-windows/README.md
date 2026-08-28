@@ -66,4 +66,13 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
   gbrain (searchable layer) but neither depends on the other.
 - [`obsidian-wiki`](../obsidian-wiki/) — a wiki gbrain can ingest for semantic
   search; part of the same KNOWLEDGE branch.
+- [`gbrain-local-reranker`](../gbrain-local-reranker/) — follow-on pack, run this
+  first: free local reranker via llama-server, replacing the hosted ZeroEntropy
+  default before its 2026-09-04 shutdown.
+- [`gbrain-local-embeddings`](../gbrain-local-embeddings/) — follow-on pack:
+  swap to a smaller free local embedding model when it's contending for GPU
+  VRAM against a local reranker.
+- [`gbrain-upgrade`](../gbrain-upgrade/) — follow-on pack: the safe self-update
+  procedure, including recovery when the bundled schema migration stops
+  partway through with no error surfaced.
 - [`foundation`](../foundation/) — threads gbrain-windows as `layer-4-capabilities`.

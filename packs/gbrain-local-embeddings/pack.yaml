@@ -1,0 +1,144 @@
+# gbrain-local-embeddings -- swap gbrain's embedding model for a smaller, free,
+# local one when your embedding+reranker VRAM budget is tight.
+#
+# SKIP THIS PACK IF: you're happy with your current embedding cost/speed, OR your
+# GPU already has headroom (8GB+ free after your reranker/chat models load), OR
+# you don't run a local reranker at all (this pack solves GPU contention between
+# TWO local models sharing one card -- if you only run one local AI model, you
+# probably don't have the problem this fixes).
+#
+# WHY THIS EXISTS: verified 2026-08-28 -- a brain running BOTH a local embedding
+# model (4B params, ~4.4GB loaded incl. context) AND a local reranker (4B params,
+# ~2.5GB) on one 8GB GPU was at 96% VRAM from the embedding model ALONE, before the
+# reranker or a chat model even loaded. Real `gbrain query` calls were taking
+# 20-55+ seconds under the resulting model-swap thrashing. Swapping the embedding
+# model to a 0.6B sibling (same family, same tooling, just smaller) roughly halved
+# real end-to-end query time in a controlled test (steady-state 8.9s -> 4.7s for
+# embed+rerank together, on the exact large documents that caused the original
+# slowdown) with NO measurable accuracy loss (5/5 correct across 5 different real
+# content domains, confidence margins within 3% of the 4B model).
+#
+# THIS IS A DESTRUCTIVE, WHOLE-BRAIN OPERATION, NOT A CONFIG FLIP: changing the
+# embedding model's dimension count means every existing stored vector becomes
+# incompatible and gets wiped + rebuilt (gbrain's own tool calls this out
+# explicitly as DESTRUCTIVE). Semantic search degrades to lexical-only until the
+# rebuild finishes. It costs zero dollars if you're already on a local provider
+# (verified: a 41,392-chunk full-brain re-embed priced at $0.52 using OpenAI's
+# real published rate as gbrain's own cost estimator -- but if you're ALREADY
+# local, that estimate doesn't reflect your real bill, which is compute time, not
+# money). Budget 1-2+ hours for a large brain; it's resumable if killed.
+name: gbrain-local-embeddings
+version: 0.1.0
+steps:
+  - id: verify-the-actual-bottleneck-first
+    instruction: >
+      Before touching anything, confirm your embedding model IS the VRAM
+      bottleneck -- don't guess. Check what's actually loaded and how much
+      headroom is left.
+    check:
+      type: command_succeeds
+      cmd: ollama ps
+    on_fail: |
+      `ollama ps` should list your currently-loaded models with their VRAM size.
+      Cross-reference against `nvidia-smi --query-gpu=memory.used,memory.total
+      --format=csv`. If you have 2GB+ free after your embedding model + reranker
+      (if any) are both loaded, this pack likely won't help you -- your slowness
+      has a different cause (see gbrain-windows's day-2 recovery doc for other
+      known traps: query-embed deadlines, DB round-trip latency, CLI teardown
+      overhead).
+
+  - id: candidate-model-pulled
+    instruction: >
+      Pull the smaller sibling model from the SAME family as your current
+      embedding model (matching families keep the swap conceptually simple --
+      you're changing size, not switching vendors). This example uses
+      qwen3-embedding, verified this session; substitute your family's smaller
+      variant if different.
+    check:
+      type: command_succeeds
+      cmd: ollama list
+    on_fail: |
+      ollama pull qwen3-embedding:0.6b
+      (or your embedding family's smallest well-supported variant -- check
+      https://ollama.com/library for available sizes)
+
+  - id: accuracy-verified-before-committing
+    instruction: >
+      THE step that matters most. A smaller model can be meaningfully less
+      accurate -- don't find out after a destructive whole-brain migration.
+      Test BOTH models against several real queries spanning DIFFERENT content
+      domains from your own brain (not just one lucky example) before deciding.
+    check:
+      type: command_succeeds
+      cmd: python packs/gbrain-local-embeddings/files/compare_embedding_accuracy.py
+    on_fail: >
+      The smaller model got a wrong top-match on at least one of the test
+      queries, or its confidence margin degraded by more than ~20% versus the
+      current model. Either: (a) don't make this swap -- your content may need
+      the bigger model's discrimination, or (b) try a mid-size variant if your
+      family has one (many have a 3-tier ladder, not just big/small).
+
+  - id: speed-verified-on-real-content
+    instruction: >
+      Confirm the smaller model is ACTUALLY faster on YOUR real content, not
+      just in theory. Use real large documents from your own brain (the ones
+      most likely to be slow), not a synthetic test string.
+    check:
+      type: command_succeeds
+      cmd: python packs/gbrain-local-embeddings/files/compare_embedding_speed.py
+    on_fail: >
+      If the smaller model isn't measurably faster on your real content, the
+      swap isn't worth the destructive migration cost -- stop here. Cold-start
+      timing is unreliable (Trap 7 in gbrain-local-reranker's gotchas file) --
+      re-run at least twice before concluding either way.
+
+  - id: migration-plan-reviewed
+    instruction: >
+      Before running the real (destructive) migration, review its dry-run plan
+      so you know the real scope: chunk count, estimated cost, and any warnings
+      about live workers that could corrupt the migration's own bookkeeping.
+    check:
+      type: command_succeeds
+      cmd: gbrain migrate embeddings --to ollama:<your-target-model> --dim <N> --dry-run
+    on_fail: |
+      Common dry-run warnings and what they mean:
+      - "DESTRUCTIVE: the embedding column is rebuilt... DELETES every stored
+        embedding vector" -- expected, this is the whole operation. Semantic
+        search degrades to lexical-only until the rebuild finishes.
+      - "N live minion worker(s) detected" -- STOP the jobs supervisor + worker
+        FIRST (`gbrain jobs supervisor stop`, then verify the worker child
+        actually died -- it often survives the stop command, same orphaning
+        pattern documented in gbrain-windows). A live worker's writes get
+        counted stale by the migration's own census and silently re-embedded,
+        wasting time.
+
+  - id: migration-completed-and-verified
+    instruction: >
+      Run the real migration detached (it can take 1+ hours on a large brain;
+      never run it as a blocking foreground command). Verify completion via
+      gbrain's own status command, not just "the process exited."
+    check:
+      type: command_succeeds
+      cmd: gbrain migrate embeddings --status
+    on_fail: |
+      "Migration incomplete: N chunk(s) still stale" -- check WHY before blindly
+      re-running. A common cause: a small number of oversized source files
+      (large generated HTML/dashboard exports) exceeding even the bulk-embed
+      timeout (`GBRAIN_AI_EMBED_TIMEOUT_MS`, default 60s -- NOT the same as
+      `GBRAIN_QUERY_EMBED_TIMEOUT_MS`, which is the separate 6s LIVE QUERY
+      deadline and won't fix this). Raise it for the retry:
+      `GBRAIN_AI_EMBED_TIMEOUT_MS=180000 gbrain migrate embeddings --to
+      ollama:<model> --dim <N> --yes` -- this resumes, it does not restart from
+      zero; completed chunks are never re-embedded.
+
+  - id: restart-supervisor
+    instruction: >
+      If you stopped the jobs supervisor before migrating, bring it back --
+      easy to forget once the migration itself succeeds.
+    check:
+      type: command_succeeds
+      cmd: gbrain jobs supervisor status
+    on_fail: |
+      gbrain jobs supervisor start --detach
+      (from a git-bash/POSIX shell on Windows, not PowerShell -- PowerShell
+      resolves gbrain's HOME wrong, see gbrain-windows pack)
