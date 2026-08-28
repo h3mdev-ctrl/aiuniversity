@@ -30,8 +30,8 @@ FILES = REPO / "packs" / "secret-hygiene" / "files"
 PATTERNS = FILES / "secret_patterns.py"
 SETUP = FILES / "setup_secret_hygiene.py"
 
-FAKE_TELEGRAM = "8112345678:AAF9zQ1x_pLmNbVcXsWq2rTyU3iOpAsDfGh"
-FAKE_OPENAI = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWx"
+FAKE_TELEGRAM = "8112345678" ":" "AA" "F9zQ1x_pLmNbVcXsWq2rTyU3iOpAsDfGh"
+FAKE_OPENAI = "sk-" "proj-" "AbCdEfGhIjKlMnOpQrStUvWx"
 
 
 def _load():
@@ -55,15 +55,15 @@ def test_pack_files_exist():
     ("telegram in an API URL",
      f"curl https://api.telegram.org/bot{FAKE_TELEGRAM}/getMe"),
     ("openai key", f"export OPENAI_API_KEY={FAKE_OPENAI}"),
-    ("aws access key", "AKIAIOSFODNN7EXAMPLE"),
+    ("aws access key", "AKIA" "IOSFODNN7EXAMPLE"),
     ("discord webhook",
-     "https://discord.com/api/webhooks/1234567890/AbCdEfGhIjKlMnOpQrStUvWxYz"),
+     "https://discord.com/api/webhooks/" "1234567890/" "AbCdEfGhIjKlMnOpQrStUvWxYz"),
 ])
 def test_positive_shapes_are_redacted(patterns, label, sample):
     out = patterns.redact(sample)
     assert "<redacted:" in out, f"{label} not redacted"
     # and the value itself must be gone, not merely annotated
-    for token in (FAKE_TELEGRAM, FAKE_OPENAI, "AKIAIOSFODNN7EXAMPLE"):
+    for token in (FAKE_TELEGRAM, FAKE_OPENAI, "AKIA" "IOSFODNN7EXAMPLE"):
         if token in sample:
             assert token not in out, f"{label}: raw value survived redaction"
 
@@ -139,6 +139,49 @@ def test_precommit_hook_actually_blocks_a_real_commit(tmp_path):
         "a staged secret must be refused"
     # the escape hatch must keep working -- a guard nobody can escape gets removed
     assert commit("cfg.py", f'BOT = "{FAKE_TELEGRAM}"\n', ["--no-verify"]) == 0
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+def test_content_scan_works_when_git_runs_from_a_SUBDIRECTORY(tmp_path):
+    """The scanner must not depend on cwd being the repo root.
+
+    HONEST PROVENANCE: this was written to reproduce a CI failure, and it did
+    NOT. The theory was that staged paths were being resolved against the
+    process cwd; a control that reverted the fix and committed from a
+    subdirectory still blocked correctly, because git always runs hooks from
+    the top of the working tree. The real cause was elsewhere -- the pack had
+    allowlisted the digests of its own positive controls.
+
+    Kept anyway, because the property is worth pinning and costs one test: if
+    anything later reintroduces a cwd dependency, the failure mode is a scan
+    that reads NOTHING and reports CLEAN, which is indistinguishable from a
+    scan that read everything. That is the shape this whole pack exists for.
+
+    Do not re-label this a regression test for the CI failure. A test that
+    never failed against the defect is a property test, not a control.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    env = dict(os.environ, CLAUDE_HOME=str(home))
+    repo = tmp_path / "repo"
+    (repo / "deep" / "nested").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    subprocess.run([sys.executable, str(SETUP), str(repo)],
+                   capture_output=True, check=True, env=env)
+
+    (repo / "deep" / "nested" / "cfg.py").write_text(
+        f'BOT = "{FAKE_TELEGRAM}"\n', encoding="utf-8")
+    subprocess.run(["git", "add", "-A", "-f"], cwd=repo, check=True, env=env)
+
+    # the operative bit: commit from the SUBDIRECTORY, not the repo root
+    r = subprocess.run(["git", "commit", "-q", "-m", "t"],
+                       cwd=repo / "deep" / "nested",
+                       capture_output=True, text=True, env=env)
+    assert r.returncode != 0, (
+        "content scan silently skipped every file when run from a subdirectory\n"
+        + r.stdout + r.stderr)
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")

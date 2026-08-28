@@ -59,18 +59,13 @@ ALLOW_SEED = """# Digests (sha256[:12]) of secret-shaped values confirmed BENIGN
 # NEVER add a digest you have not looked at. The scanner prints the digest of
 # whatever it found, so the workflow is: read the line, decide, paste the digest.
 #
-# Seeded with this pack's OWN synthetic specimens. They are secret-SHAPED by
-# design -- that is what makes them useful positive controls -- so without these
-# the scanner correctly blocks the first commit of the pack that contains it.
-# (It did exactly that, which is how these lines came to be here.)
-ccdb768b7eac  # sk-proj-AbCdEfGhIjKlMnOpQrStUvWx  -- synthetic openai key
-4e6c19f44cdb  # 8112345678:AA...  -- synthetic telegram bot token
-964c62515e09  # discord.com/api/webhooks/1234567890/...  -- synthetic webhook
-1a5d44a2dca1  # AKIAIOSFODNN7EXAMPLE  -- AWS's OWN published example key
+# The pack's own test specimens are built from PARTS so they do not match
+# these patterns as they sit on disk -- a positive control that had to be
+# allowlisted would not be a control at all.
 """
 
-FAKE_TOKEN = "8112345678:AAF9zQ1x_pLmNbVcXsWq2rTyU3iOpAsDfGh"
-FAKE_KEY = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWx"
+FAKE_TOKEN = "8112345678" ":" "AA" "F9zQ1x_pLmNbVcXsWq2rTyU3iOpAsDfGh"
+FAKE_KEY = "sk-" "proj-" "AbCdEfGhIjKlMnOpQrStUvWx"
 
 
 def _shim_for(scanner: pathlib.Path) -> str:

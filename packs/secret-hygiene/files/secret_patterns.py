@@ -112,13 +112,17 @@ if __name__ == "__main__":
         ("telegram in an API URL",
          "curl https://api.telegram.org/bot8112345678:"
          "AAF9zQ1x_pLmNbVcXsWq2rTyU3iOpAsDfGh/getMe"),
-        ("openai key", "export OPENAI_API_KEY=sk-proj-AbCdEfGhIjKlMnOpQrStUvWx"),
+        # Every specimen here is built from PARTS so it does NOT match these
+        # patterns as it sits on disk, while still being a whole value at run
+        # time. Otherwise the pack's own positive controls would have to be
+        # allowlisted -- and a control you have allowlisted is not a control.
+        ("openai key", "export OPENAI_API_KEY=" + "sk-" "proj-" "AbCdEfGhIjKlMnOpQrStUvWx"),
         ("jwt", "K=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
                 "eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzAwMDAwMDAw."
                 "aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcd"),
         ("discord webhook",
-         "https://discord.com/api/webhooks/1234567890/AbCdEfGhIjKlMnOpQrStUvWxYz"),
-        ("aws key", "AKIAIOSFODNN7EXAMPLE"),
+         "https://discord.com/api/webhooks/" "1234567890/" "AbCdEfGhIjKlMnOpQrStUvWxYz"),
+        ("aws key", "AKIA" "IOSFODNN7EXAMPLE"),
     ]
     NEGATIVE = [
         ("plain timestamp", "run at 20260828 and log it"),

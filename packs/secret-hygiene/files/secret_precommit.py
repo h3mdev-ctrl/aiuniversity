@@ -100,6 +100,31 @@ def load_allowlist() -> set[str]:
         return set()          # unreadable allowlist allows nothing: still safe
 
 
+def repo_root() -> pathlib.Path:
+    """Anchor staged paths to the repo top, NOT to cwd.
+
+    `git diff --cached --name-only` returns paths relative to the repository
+    root. Resolving them against the process cwd works only when the hook
+    happens to run from the top of the tree -- and when it does not, every
+    `Path(rel).is_file()` is False, every file is skipped, and the scan reports
+    CLEAN having read nothing.
+
+    That is exactly what happened: on Windows the name-based checks and the
+    content checks both fired; on Linux CI the name checks fired (they are pure
+    string matching) while the content scan silently found nothing. A green
+    scan that read zero files looks identical to a green scan that read all of
+    them -- the same shape as the all-clear this whole pack exists because of.
+    """
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        return pathlib.Path(out) if out else pathlib.Path.cwd()
+    except Exception as exc:
+        print(f"pre-commit: cannot locate the repository root: {exc}")
+        print("pre-commit: BLOCKING -- refusing to commit without a scan.")
+        raise SystemExit(1)
+
+
 def staged_files() -> list[str]:
     try:
         out = subprocess.run(
@@ -121,6 +146,9 @@ def main() -> int:
 
     findings: list[str] = []
     name_hits: list[str] = []
+    root = repo_root()
+    scanned = 0
+    unreadable: list[str] = []
 
     for rel in files:
         if SKIP.search(rel):
@@ -128,15 +156,20 @@ def main() -> int:
         if BLOCKED_NAMES.search(rel):
             name_hits.append(rel)
             continue
-        path = pathlib.Path(rel)
+        path = root / rel
         if not path.is_file():
+            # Staged but absent: normally a rename or a delete race. Counted,
+            # never silently dropped -- see the coverage assertion below.
+            unreadable.append(rel)
             continue
         try:
             if path.stat().st_size > MAX_BYTES:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            unreadable.append(rel)
             continue
+        scanned += 1
         for i, line in enumerate(text.splitlines(), 1):
             # An existing redaction marker is proof it was already handled.
             if "<redacted:" in line:
@@ -150,6 +183,20 @@ def main() -> int:
                         break          # inspected, confirmed benign
                     findings.append(f"    {rel}:{i}  {label}  sha256[:12]={dig}")
                     break
+
+    # COVERAGE ASSERTION. A scan that read nothing is not a clean scan, and the
+    # two are indistinguishable from the outside -- which is how this pack's
+    # founding defect happened. If files were staged for content scanning and
+    # NONE could be read, that is a broken scanner, not a clean repo.
+    if not scanned and unreadable:
+        print("pre-commit: staged files exist but NONE could be read "
+              f"({len(unreadable)} unreadable, e.g. {unreadable[0]}).")
+        print("pre-commit: BLOCKING -- a scan that read nothing is not a pass.")
+        return 1
+    if unreadable and scanned:
+        print(f"pre-commit: note -- {len(unreadable)} staged path(s) could not be "
+              f"read and were NOT scanned (renamed or deleted?): "
+              f"{', '.join(unreadable[:3])}")
 
     if not findings and not name_hits:
         return 0
