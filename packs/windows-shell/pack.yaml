@@ -36,8 +36,13 @@
 #  10. shutil.copy2 preserves mtime, so `ls -t` misorders your .bak files
 #
 # 5-10 were measured on a live machine (441 sessions, 46,857 tool calls), not
-# imagined. Enforcement for the code patterns lives in the `hooks` pack -- a
-# rule with no attachment point at the moment of the mistake does not fire.
+# imagined. Enforcement for the code patterns lives in the `hooks` pack --
+# specifically its `windows-composition-guard` step, which installs
+# packs/guardrails/files/windows_quirk_guard.py: a PreToolUse hook that BLOCKS
+# gotchas 5 and 9 outright (they are already broken before they run) and advises
+# on 6, 7 and 8. Prose cannot reach any of these, because they are typed
+# MID-TURN while composing a tool call -- a rule with no attachment point at the
+# moment of the mistake does not fire. Run that step after this pack.
 # Plus the write-a-config-without-a-BOM helper.
 name: windows-shell
 version: 0.1.0

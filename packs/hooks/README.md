@@ -34,6 +34,29 @@ The **soft version** — "Don't tell the user when to stop" — also ships in th
 foundation constitution. Same trade-off applies: opt-in if the soft principle keeps
 getting ignored.
 
+**hook-liveness** — `hook_doctor.py`. Feeds every hook you have registered a
+deliberately benign payload for its event and fails if it crashes or answers with
+anything other than allow/block. This is the step people skip and the one that pays
+off most: a hook that crashes and a hook with nothing to say are **identical** from
+the outside, and `PreToolUse` treats an unexpected exit as a *non-blocking* error —
+so a crashed guard permits while everything still looks normal.
+
+**guard-correctness** — `guard_regression.py`. The other half. The doctor asks "is it
+alive?"; this asks "does it still catch the thing it was built for, and still ignore
+the near-miss?" A hook can pass liveness with a matcher that no longer matches
+anything — which is exactly what a dark advisory list looks like from the outside.
+Ships cases for every guard in this framework, delegates to a guard's own selftest
+where a fixture is needed, and takes your own cases from
+`$CLAUDE_HOME/guard_cases.json`.
+
+**windows-composition-guard** *(Windows only)* — `windows_quirk_guard.py`. The
+enforcement half of the [`windows-shell`](../windows-shell/) pack, which documents
+these traps but cannot reach them: they are mistakes made **while composing a tool
+call**, mid-turn, where a rule read at the start of the turn has no attachment point.
+Blocks three compositions that are already broken before they run (a PowerShell
+here-string pasted into bash, a Python heredoc that won't parse, `$_` pre-expanded by
+bash before PowerShell sees it) and advises on four code patterns that bite later.
+
 ### Why opt-in
 
 Both are shipped in `packs/guardrails/files/` but not default steps, for the same
@@ -64,6 +87,10 @@ constitution for a while and still get skipped. That's the signal to install.
 - **Fail open on unexpected errors.** A guard that exits non-zero on bad input silently
   breaks every matched tool call. All hooks here wrap logic in `try/except Exception:
   return 0`.
+- **A skipped case is not a passing case.** `guard_regression.py` reports a guard you
+  haven't installed as SKIPPED and a hook you *have* registered with no cases as
+  UNCOVERED. Read the verdict line, not the colour — an all-green run made entirely
+  of skips checked nothing at all.
 - **Write the script first, register it second.** If `settings.json` points at a hook
   file that doesn't exist yet, every matched tool call fails until you create it. The
   installers here always write the hook file before merging the registration.
@@ -75,6 +102,12 @@ constitution for a while and still get skipped. That's the signal to install.
 - ❌ **Shipping the hook file without registering it.** "Installed" ≠ "active". The
   two-step check (file present, registered in settings) exists because both can silently
   fail independently.
+- ❌ **Deleting a regression case to get back to green.** A FAIL means a footgun you
+  have already hit is no longer caught. Decide whether the rule or the case is wrong
+  and fix *that* — removing the case is how a guard goes dark with nobody noticing.
+- ❌ **Running only the doctor.** Liveness and correctness fail independently and need
+  different repairs. HEALTHY from `hook_doctor.py` on a guard whose matcher has gone
+  dark is a true statement about the wrong question.
 - ❌ **Leaving opt-in hooks in place after they've done their job.** If the soft
   principle is now reliably followed, uninstall the hard hook — remove the file and
   the settings.json entry — so it doesn't create noise.

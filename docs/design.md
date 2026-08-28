@@ -132,7 +132,7 @@ The foundation runbook sets up **six layers**, each a step (or group) with a con
 | 0. Identity | Who you are / how Claude should talk to you (`context/me.md`, `work.md`, `user_profile`) | Ask "who am I and how should you talk to me?" → specific answer |
 | 1. Memory that compounds | `memory/` + always-loaded `MEMORY.md`; a **resolver** (intent→memory routing) so memory is reachable; the reflex rule (fail 2× → write memory now); `memory_doctor` audit | Write a test memory, new session, confirm it's recalled at the right moment |
 | 2. Constitution + routing | `CLAUDE.md` = rules/invariants; resolver/skill-routing = the org chart. Two files on purpose | CLAUDE.md states hard invariants + environment up front |
-| 3. Guardrails (hooks) | Deterministic backstops so mistakes are caught by code (`win11_quirk_guard`, `credential_guard`) | Attempt the forbidden thing (read a `.env`) → hook blocks it |
+| 3. Guardrails (hooks) | Deterministic backstops so mistakes are caught by code (`windows_quirk_guard`, `credential_guard`) | Attempt the forbidden thing (read a `.env`) → hook blocks it |
 | 4. Capabilities (module slots) | Skills + MCP servers set up **and verified live** — this is where gbrain/Obsidian modules slot in | Each module's own activation exam passes |
 | 5. Durability | Backup (`backup-memory`), decision log w/ rationale, maintenance cadence (doctor, consolidate, re-probe stale) | A backup exists and ran recently |
 

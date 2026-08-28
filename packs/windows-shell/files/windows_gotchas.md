@@ -179,6 +179,38 @@ composed*.
 
 Write files with the Write/Edit tool, not by heredoc-ing Python into a shell.
 
+### The second shape: a heredoc carrying a code *payload*
+
+A guard that parses the heredoc body catches the case above. It is blind **by
+construction** to this one:
+
+```
+python - <<'PY'
+new = '''sys.stdout = _Tee(...)
+print(f"          <-- the \n here became a REAL newline
+===== run " + stamp)
+'''
+open(target, 'w').write(new)
+PY
+```
+
+The heredoc body **parses fine**. What got mangled is inside a triple-quoted
+*payload* — code on its way into another file. The script runs, reports success,
+and the file it just wrote is what fails to parse, one step removed from the
+command you are reading. This cost ~6 tool calls in a single session even with
+the body-parsing guard installed and working.
+
+The lesson generalises past heredocs: **when you write code that writes code,
+the failure surfaces one layer away from where you are looking.** Parse the
+payload, not just the wrapper — that is what
+`windows_quirk_guard`'s `heredoc-code-payload` advisory does.
+
+And the meta-lesson, which cost more than the bug: the first detector written for
+this hunted for a backslash-`n` inside the payload and fired on nothing, because
+by the time anything downstream sees the command that escape is **already a real
+newline** — a fact written in a comment directly above the code being extended,
+and not read first.
+
 ## 10. `shutil.copy2` preserves mtime — so `ls -t` misorders your backups
 
 `copy2` copies metadata including mtime. A backup made with it carries the mtime
@@ -261,3 +293,33 @@ Two habits that end it:
 And keep the `count(anchor) == 1` assertion regardless. A marker matching **0**
 times and a marker matching **3** times are both wrong, and both otherwise
 present as "applied cleanly".
+
+## 14. Polling a Scheduled Task from your agent's shell can KILL it
+
+A Windows Scheduled Task launched from an agent session, then watched with a
+`Get-ScheduledTaskInfo` poll loop in that same session, kept dying with
+`0xC000013A` — `STATUS_CONTROL_C_EXIT`. That code means "someone sent this
+process a Ctrl+C", and it is reproducible: fire the task and poll it, it dies;
+fire the task and **don't** poll it, it exits 0.
+
+The cause is that the poll loop runs inside a tool call, and when the tool call
+is torn down the whole process tree it created goes with it — including, on this
+box, the task it was only supposed to be *observing*. The watcher was the killer.
+
+Four wrong hypotheses were paid for before the decisive test: console encoding,
+the output-tee wrapper, `capture_output`, the machine being on battery. None of
+them were the instrument. The test that settled it took one run: **stop
+observing, and see whether the symptom survives.**
+
+The general rule, and it is worth more than the Windows detail:
+
+> When something dies only while you are watching it, suspect your instrument
+> before you suspect the subject.
+
+Practical form: launch it detached, have the job write its own result to a file
+and touch a `.done` sentinel, and check for that sentinel on a LATER turn. Never
+sit in a loop waiting on a process you started from a tool call.
+
+(Related trap in the same family — a `.done` sentinel written unconditionally
+says "this finished", not "this succeeded". Have the job write its exit code into
+the file, and read *that*.)
