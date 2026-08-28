@@ -1,120 +1,257 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-credential_guard.py -- PreToolUse hook: block Claude from reading credential files.
+credential_guard.py — Claude Code PreToolUse hook.
 
-A deterministic backstop for a footgun humans still make in Claude Code: telling
-an agent "read this .env" without thinking, or a `cat .env` slipping into a Bash
-call. The point: catch it by CODE, not by hoping the agent remembered.
+Blocks Read/Bash tool calls that would expose credential files to the
+transcript. The rule "never cat secret files" has been violated 4× by
+Claude in May 2026 despite memory entries telling it not to.
 
-Input: JSON on stdin with {tool_name, tool_input}. Exit 0 to allow; exit 2 to
-deny with a message on stderr (Claude Code's hook convention for PreToolUse).
+Memory tells; hooks bounce. This is the bouncer.
 
-Blocks:
-- Read tool on a file path matching a credential pattern.
-- Bash tool on a command that would read a credential path (cat/less/type/head/
-  tail/Get-Content and friends).
+Exit codes:
+  0  — allow the tool call (default)
+  2  — block the tool call, stderr is shown to Claude as the reason
 
-The block message doesn't just say no -- it names the safe command for the
-question the agent was probably asking (field names, existence, value diff),
-so the SAME reflex gets satisfied a different way instead of just bouncing.
-This matters more than it looks: a guard that only says "blocked" gets hit
-again next turn, because the agent still has no faster path than the one that
-just failed.
+To override (rare; for legitimate credential rotation), set env var:
+  CLAUDE_CRED_GUARD=off
 
-Bypass (rare, explicit only): prefix the command with `CLAUDE_CRED_GUARD=off `.
-Not a real env var read from the parent shell -- deliberately. An env var set
-once in a parent shell would silently bypass every descendant call; a prefix on
-the command string is visible in the transcript and audited per call.
+Banned file patterns are duplicated from feedback_credentials.md.
+Keep these in sync when that memory is updated.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
+from pathlib import Path
 
-CRED_PATTERNS = [
-    r"(?:^|[/\\])\.env(?:$|\.[a-zA-Z0-9_-]+$)",       # .env, .env.local, .env.production
-    r"(?:^|[/\\])credentials\.json$",
-    r"(?:^|[/\\])\.credentials$",
-    r"(?:^|[/\\])id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$",  # SSH keys
-    r"(?:^|[/\\])\.aws[/\\]credentials$",
-    r"(?:^|[/\\])\.ssh[/\\]id_",
-    r"(?:^|[/\\])\.npmrc$",
-    r"(?:^|[/\\])\.netrc$",
-    r"(?:^|[/\\])\.pypirc$",
-    r"\.(?:pem|key|p12|pfx)$",                         # cert/key files
-    r"(?:credential|secret|service-?account)[^/\\]*\.json$",
+# ---------------------------------------------------------------------------
+# NOTE: there is NO env-var-based override. An env var set in a parent shell
+# would silently bypass for ALL descendants — too leaky. The only valid bypass
+# is an explicit in-command prefix (handled below in main()) which is visible
+# in the transcript and audited per-call.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Banned absolute paths (case-insensitive on Windows)
+# ---------------------------------------------------------------------------
+HOME = Path.home()
+
+# Resolved-path equality (canonical paths Claude or bash would produce)
+BANNED_PATHS = {
+    str(HOME / ".gbrain" / "config.json"),
+    str(HOME / ".claude.json"),
+    str(HOME / ".aws" / "credentials"),
+    str(HOME / ".npmrc"),
+    str(HOME / ".pypirc"),
+    str(HOME / ".netrc"),
+    str(HOME / ".config" / "gh" / "hosts.yml"),
+}
+
+# Suffix / basename / substring patterns
+BANNED_GLOB_PATTERNS = [
+    re.compile(r"(^|[\\/])\.env($|\.|[\\/])", re.IGNORECASE),                          # .env, .env.local, .env/
+    re.compile(r"\.(pem|key|p12|pfx)$", re.IGNORECASE),                                # cert/key files
+    re.compile(r"(^|[\\/])id_(rsa|ed25519|ecdsa|dsa)(\.pub)?$", re.IGNORECASE),         # SSH keys
+    re.compile(r"(credential|secret|service-?account|firebase-adminsdk)[^\\/]*\.json$", re.IGNORECASE),
+    re.compile(r"\.gbrain[\\/]config\.json$", re.IGNORECASE),                          # any gbrain config
+    re.compile(r"[\\/]\.aws[\\/]credentials$", re.IGNORECASE),
 ]
-CRED_RE = re.compile("|".join(CRED_PATTERNS), re.IGNORECASE)
-READ_CMDS_RE = re.compile(
-    r"\b(?:cat|tac|less|more|head|tail|type|Get-Content|gc|nano|vim|vi|code|"
-    r"strings|xxd|od|hexdump)\b",
+
+# Allowlist (exact strings the matched path may end with, overriding above)
+# Use sparingly — only for confirmed non-secret files that match a pattern.
+ALLOWED_OVERRIDES = [
+    # e.g. r"public_keys\.json$"
+]
+
+
+def _normalize(p: str) -> str:
+    """Lowercase + forward-slash for stable matching on Windows."""
+    return str(Path(p)).replace("\\", "/").lower()
+
+
+def is_banned_path(raw_path: str) -> str | None:
+    """Return a reason string if path is banned, else None."""
+    if not raw_path:
+        return None
+    norm = _normalize(raw_path)
+
+    for ok in ALLOWED_OVERRIDES:
+        if re.search(ok, norm, re.IGNORECASE):
+            return None
+
+    for banned in BANNED_PATHS:
+        if norm == _normalize(banned):
+            return f"path matches banned credential file ({banned})"
+
+    for pat in BANNED_GLOB_PATTERNS:
+        m = pat.search(norm)
+        if m:
+            return f"path matches banned pattern {pat.pattern!r}"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Bash command inspection
+# ---------------------------------------------------------------------------
+# Commands that dump file contents to stdout (transcript-leaking)
+READ_VERBS = re.compile(
+    r"(?:^|[\s|;&`(])"
+    r"(cat|tac|head|tail|less|more|type|Get-Content|gc|Read|sed|awk|grep|rg|"
+    r"strings|xxd|od|hexdump|jq)"
+    r"\b",
     re.IGNORECASE,
 )
 
-SAFE_ALTERNATIVES = """\
-BLOCKED: {reason}
-
-Don't read the whole file -- go straight to the safe form of the question
-you were probably asking:
-  - field names only:   jq 'keys' <file>
-  - names + types:       jq 'to_entries|map({{k:.key,t:(.value|type)}})' <file>
-  - does a var exist:    grep -oE '^[A-Z_]+=' .env
-  - compare two secrets: python -c "import hashlib;print(hashlib.sha256(open(r'<file>').read().encode()).hexdigest()[:12])"
-  - anything else:       usually answerable from docs/--help without reading the file at all
-
-If you genuinely need the raw file (rare -- e.g. rotating a value), prefix the
-command with CLAUDE_CRED_GUARD=off so the bypass is explicit and visible."""
+# Also catch redirection-FROM-file (`< file`) and `printf ... "$(<file)"` style
+REDIR_FROM_FILE = re.compile(r"<\s*([^\s|;&`)]+)")
 
 
-def is_credential_path(path: str) -> bool:
-    return bool(path) and bool(CRED_RE.search(str(path)))
-
-
-def _bash_reads_credential(cmd: str) -> "str | None":
-    """Return the matched token if this Bash command would read a credential
-    path to stdout/terminal, else None. Splits on shell word-boundaries and
-    checks WHOLE words -- not substrings -- so `process.env` (a bare
-    identifier) doesn't false-positive on the `.env` pattern the way naive
-    substring matching would; a real path like `config/.env` still matches
-    because the slash precedes it.
-    """
-    if not READ_CMDS_RE.search(cmd):
+def find_banned_in_bash(cmd: str) -> tuple[str, str] | None:
+    """If the bash command would read a banned path to stdout, return (path, reason)."""
+    if not cmd:
         return None
+
+    # Quick screen: only if a read-verb is present
+    if not READ_VERBS.search(cmd):
+        return None
+
+    # Split into whole shell-words on whitespace + shell control operators, strip
+    # surrounding quotes, and check each WHOLE word. Checking whole words (not
+    # sub-tokens) is what tells a real path like "config/.env" (banned — '/.env'
+    # has a slash before it, so is_banned_path matches) apart from an identifier
+    # like "process.env" (safe — '.env' is glued to a word char, matching no path
+    # pattern). The previous tokenizer sliced ".env" out of the MIDDLE of
+    # "process.env" and then saw it at string-start, a false positive that blocked
+    # `grep "process.env" file.ts`, `git ls-files | grep "\.env"`, etc.
+    # (A quoted path containing spaces still gets caught: splitting it leaves a
+    # tail like "Workspace/.env" whose '/.env' still matches.)
     for word in re.split(r"[\s|;&()=`<>]+", cmd):
         word = word.strip().strip('"').strip("'")
-        if word and is_credential_path(word):
-            return word
+        if not word:
+            continue
+        expanded = os.path.expandvars(os.path.expanduser(word))
+        reason = is_banned_path(expanded)
+        if reason:
+            return expanded, reason
+
+    # Also check `< file` redirection targets
+    for m in REDIR_FROM_FILE.finditer(cmd):
+        tok = m.group(1).strip('"').strip("'")
+        expanded = os.path.expandvars(os.path.expanduser(tok))
+        reason = is_banned_path(expanded)
+        if reason:
+            return expanded, reason
+
     return None
 
 
-def check(event: dict) -> "str | None":
-    tool = event.get("tool_name", "")
-    ti = event.get("tool_input") or {}
-    if tool == "Read":
-        path = ti.get("file_path", "")
-        if is_credential_path(path):
-            return f"reading credential-bearing file {path!r}"
-    if tool == "Bash":
-        cmd = ti.get("command", "") or ""
-        if re.match(r"^\s*CLAUDE_CRED_GUARD=(off|0|false)\b", cmd, re.IGNORECASE):
-            return None
-        hit = _bash_reads_credential(cmd)
-        if hit:
-            return f"bash command would read credential file (matched {hit!r})"
-    return None
-
-
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 def main() -> int:
     try:
-        event = json.loads(sys.stdin.read() or "{}")
-    except json.JSONDecodeError:
-        return 0  # malformed input: don't block by accident
-    reason = check(event)
-    if reason:
-        print(SAFE_ALTERNATIVES.format(reason=reason), file=sys.stderr)
+        payload = json.load(sys.stdin)
+    except Exception as e:
+        # Don't block on hook bugs — fail open with a stderr note.
+        print(f"[credential_guard] failed to parse stdin: {e}", file=sys.stderr)
+        return 0
+
+    tool = payload.get("tool_name") or payload.get("tool") or ""
+    inp = payload.get("tool_input") or {}
+
+    block_reason: str | None = None
+    blocked_path: str | None = None
+
+    if tool == "Read":
+        fp = inp.get("file_path") or ""
+        r = is_banned_path(fp)
+        if r:
+            block_reason = r
+            blocked_path = fp
+
+    elif tool == "Bash":
+        cmd = inp.get("command") or ""
+        # In-command override: bash sees `CLAUDE_CRED_GUARD=off <rest>` as
+        # setting the var for that command. The hook runs before bash, so
+        # env-var prefixes don't reach the hook env. Detect the prefix
+        # in the command string itself to honor the documented bypass.
+        if re.match(r"^\s*CLAUDE_CRED_GUARD=(off|0|false)\b", cmd, re.IGNORECASE):
+            return 0
+        hit = find_banned_in_bash(cmd)
+        if hit:
+            blocked_path, block_reason = hit
+
+    elif tool in ("Edit", "Write"):
+        # We don't block edits — the user may need to update credentials.
+        # But we WARN if Write would clobber a banned file with content from
+        # a `new_string` that looks substantial (best-effort, fail-open).
+        return 0
+
+    if block_reason:
+        msg = (
+            "BLOCKED by credential_guard: attempted to read credential-bearing file.\n"
+            f"  tool:   {tool}\n"
+            f"  path:   {blocked_path}\n"
+            f"  reason: {block_reason}\n"
+            "\n"
+            "DEFAULT POSTURE -- don't read this file. The structure question is\n"
+            "almost never load-bearing; check docs or `<tool> doctor --json` first.\n"
+            "\n"
+            "If you DO need to inspect the file's shape (rare), prefix with\n"
+            "CLAUDE_CRED_GUARD=off so the bypass is explicit:\n"
+            "  CLAUDE_CRED_GUARD=off jq 'keys' <file>                   # field names only\n"
+            "  CLAUDE_CRED_GUARD=off jq 'to_entries|map({k:.key,t:(.value|type)})' <file>\n"
+            "  CLAUDE_CRED_GUARD=off jq -r '.specific_known_safe_field' <file>\n"
+            "\n"
+            "To compare two secrets WITHOUT bypassing (preferred):\n"
+            "  python -c \"import hashlib;"
+            "print(hashlib.sha256(open(r'<file>').read().encode()).hexdigest()[:12])\"\n"
+            "  (Python file-read isn't gated; the guard only blocks tool calls that\n"
+            "   echo content to the transcript. Hashing reads but emits 12 hex chars.)\n"
+            "\n"
+            "If you need to MUTATE the file (rotate password etc.) -- Edit/Write are\n"
+            "NOT blocked; just don't emit a Read first.\n"
+            "\n"
+            "See memory: feedback_credentials.md for the full rule and 4 prior incidents."
+        )
+        print(msg, file=sys.stderr)
         return 2
+
     return 0
 
 
+
+def _main_fail_closed() -> int:
+    """Run main(); on an UNEXPECTED exception, BLOCK (exit 2) rather than allow.
+
+    PreToolUse semantics: 0 = allow, 2 = block, anything else = non-blocking
+    error -> THE CALL PROCEEDS. Before this wrapper a crash here exited 1, so a
+    payload that broke the checker was a payload the checker waved through
+    (measured: 6 of 7 malformed payloads, 2026-08-27).
+
+    This is a security control guarding an IRREVERSIBLE disclosure, so the safe
+    default on "I could not evaluate this" is REFUSE, not allow. Note the
+    deliberate fail-OPEN on unparseable stdin inside main() is untouched -- that
+    is a total-harness failure, not an injection signal.
+    """
+    try:
+        return main()
+    except SystemExit:
+        raise
+    except BaseException as exc:                      # noqa: BLE001 - intentional
+        print(
+            "BLOCKED (fail-closed): %s crashed while evaluating this tool call "
+            "-- %s: %s. A security guard that cannot complete its check REFUSES "
+            "rather than allows. Re-run without the unusual argument shape, or "
+            "if this is a guard bug, fix the hook from a fresh session."
+            % ("credential_guard", type(exc).__name__, exc),
+            file=sys.stderr,
+        )
+        return 2
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(_main_fail_closed())

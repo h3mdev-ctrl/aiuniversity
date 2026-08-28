@@ -164,11 +164,93 @@ exactly what a dark advisory list looks like from the outside.
 
 ---
 
-## The shape underneath all six
+## 7. Every token in a match class must carry the danger ALONE
+
+Rule 3 says a noisy guard is already dead. This is *why* they get noisy, and it
+is almost always the same thing: **a generic English word sitting in a danger
+class as a bare alternative.**
+
+A credential-solicitation guard had this noun class:
+
+```
+token|api_key|key|keys|password|pass|secret|...|pin|license|...
+```
+
+and this verb class:
+
+```
+paste|share|send|give|tell|type|enter|provide|drop|put|...
+```
+
+Both are defensible read one at a time. Together they mean ordinary prose fires
+the guard:
+
+> "…giving every row a **key** and collapsing rows that **share it**"
+
+`key` within 120 characters of `share it`. Nothing to do with credentials. Its
+own block log showed **~50% false positives across 40 events** — including one
+that blocked a commit, and one that fired on a *read-only grep* whose search
+pattern happened to contain `json.dump`.
+
+**The test, applied to each token on its own:** does its presence carry the
+danger, or does it need the rest of the sentence to be dangerous? If it needs
+context, it does not belong as a bare alternative.
+
+Three ways to fix it, in preference order:
+
+1. **Split STRONG from WEAK.** `api key`, `client_secret`, `AWS_*_KEY` stand
+   alone. Bare `key`, `pass`, `pin` do not — admit them only with a qualifier,
+   and keep them out of proximity rules entirely.
+2. **Scope to the region where the pattern would actually execute.** A
+   PowerShell-operator guard matches only inside *shell-tagged* fences and
+   strips quotes and comments first, so `echo "use ; not &&"` stays silent. Its
+   docstring says why: *a guard that cries wolf on its own explanation gets
+   ignored.* Newer guards on the same machine had not inherited it.
+3. **Require the discriminating token the danger actually needs.** For
+   solicitation that is an **addressee** — `your`, `me`, a destination like
+   "here"/"in chat", or a clause-initial imperative. It cleanly separates
+   *"paste your token **here**"* (a request) from *"Both **share** the same bot
+   **token**"* (a description), and from *"drop the token **into a .env
+   file**"* (correct advice, wrong destination).
+
+After all three: **22/22 controls**, historical firings 42 → 19.
+
+**Do NOT reach for a blanket surface exemption** — "skip `.md` files", "skip
+tests" — on a guard whose false negative is irreversible. Narrow the *pattern*.
+When you genuinely must allow a specific value, allow it **by `sha256[:12]`
+digest**, never by path: allowing a placeholder in a test fixture should not
+also allow a real credential that later lands in the same file.
+
+And note what happened while writing the fixes: **both were caught by their own
+positive controls first.** One replacement silently deleted the anchor line it
+matched; the other split the command on `|` before masking quotes, shattering
+the very grep pattern it was written to ignore. Neither was visible on reading.
+
+---
+
+## A corollary: a pattern list is an allowlist of things you remembered
+
+A redactor and a log scanner were maintained as two separate pattern lists.
+Both were missing Telegram bot tokens. The scan reported **all-clear** while a
+live bot token sat in plaintext on disk — because the scanner could not name
+what the redactor could not name.
+
+"No hits" only ever means "no hits for what I thought of".
+
+- **One list, imported** — never a second copy. Adding a shape in one place
+  should protect every consumer.
+- Treat a clean scan as evidence about *coverage*, not about *absence*.
+- When you add a shape, add a **positive control** with a synthetic specimen of
+  it. That is what caught the Telegram pattern failing to match `bot<token>` in
+  an API URL — `\b` does not match between a letter and a digit.
+
+---
+
+## The shape underneath all seven
 
 Every one is the same failure: **a component that cannot report its own
 brokenness.** A dead hook, a dead counter, a dark matcher, a blinded scan, a
-guard that cries wolf — none of them raise. They just quietly stop working, and
-the system keeps looking fine.
+guard that cries wolf, a pattern list with a hole in it — none of them raise.
+They just quietly stop working, and the system keeps looking fine.
 
 So build the thing that asks. Then run it on a schedule, not on a hunch.
