@@ -1,0 +1,108 @@
+# secret-hygiene -- stop a credential reaching disk, and stop it reaching a remote.
+#
+# The guardrails pack blocks Claude from READING your .env. This pack covers the
+# other two directions, both of which were live defects on the machine this came
+# from, found on the same morning:
+#
+#   1. WRITING -- an audit hook recorded raw command text to a plaintext JSONL.
+#      16 MB of it, containing a Discord webhook. The hook was working exactly as
+#      designed; nobody had asked what ends up IN a command line.
+#
+#   2. COMMITTING -- `git add -A` swept a hook debug log into a commit. It
+#      happened to be clean. Three repos had zero pre-commit hooks between them.
+#
+# And the defect that ties them together: a live Telegram bot token sat in a
+# plaintext log while a scan reported ALL-CLEAR -- because the scanner and the
+# redactor each kept their own pattern list, and both were missing Telegram.
+#
+# A PATTERN LIST IS AN ALLOWLIST OF THINGS YOU REMEMBERED. "No hits" only ever
+# means "no hits for what I thought of". So this pack ships ONE list
+# (files/secret_patterns.py) and a step that FAILS when a second copy drifts
+# from it.
+#
+# Fail-closed, unlike most guards here. See files/secret_precommit.py for why:
+# a secret pushed to a remote is irreversible, and rotation is the only remedy.
+#
+# Read packs/hooks/files/GUARD_DESIGN.md rule 7 before editing the pattern list.
+name: secret-hygiene
+version: 0.1.0
+steps:
+  - id: patterns-self-test
+    instruction: >
+      Install the shared credential-shape list and prove it works in both
+      directions. Positive controls use SYNTHETIC specimens -- correct shape,
+      never a real credential -- and the negative controls pin the things that
+      must NOT be redacted: a timestamp, a ratio with a colon, a git SHA, and
+      ordinary prose containing the word "key".
+
+      The negative controls matter as much as the positive ones. A redactor
+      tuned only until the leak stopped is indistinguishable from one that
+      redacts everything, and the second kind destroys the log it was meant to
+      protect.
+    check:
+      type: contains
+      cmd: python packs/secret-hygiene/files/secret_patterns.py
+      expect: "PASS"
+    on_fail: >
+      A pattern stopped matching its own specimen. Check the regex before
+      assuming the specimen is wrong -- the Telegram shape once failed because
+      it used a leading \b, which does not match between a letter and a digit,
+      so it missed the token in ".../bot<token>" API URLs.
+
+  - id: precommit-installed
+    instruction: >
+      Install the pre-commit secret scanner into this repository. It scans
+      STAGED files only, reports path + line + pattern label + sha256[:12], and
+      never prints a value.
+
+      Run it against every repo you push from, not just this one:
+        python packs/secret-hygiene/files/setup_secret_hygiene.py <repo> [<repo> ...]
+
+      It refuses to overwrite a pre-commit hook it did not write.
+    check:
+      type: command_succeeds
+      cmd: python packs/secret-hygiene/files/setup_secret_hygiene.py --check-files
+    fix: python packs/secret-hygiene/files/setup_secret_hygiene.py
+    on_fail: >
+      Files missing. Install (idempotent):
+        python packs/secret-hygiene/files/setup_secret_hygiene.py
+
+  - id: precommit-blocks
+    instruction: >
+      Prove the hook actually fires, by running REAL `git commit` calls in a
+      throwaway repo. This is the step worth insisting on: a pre-commit hook
+      that passes its unit tests and never fires is the wiring-dead failure,
+      and it looks identical to a working one from the outside.
+
+      Seven cases, both directions -- a secret is refused, a clean file is not,
+      an already-redacted line commits, `.env` is refused by name while
+      `.env.example` is not, and `--no-verify` still overrides. That last one is
+      deliberate: a guard nobody can escape is a guard they will uninstall.
+    check:
+      type: contains
+      cmd: python packs/secret-hygiene/files/setup_secret_hygiene.py --test-blocking
+      expect: "VERDICT: HEALTHY"
+    on_fail: >
+      The scanner did not refuse a staged secret. Usual causes: the pre-commit
+      shim is not executable (chmod 755), python is not on PATH for git's shell,
+      or CLAUDE_HOME points somewhere the patterns file is not.
+
+  - id: no-second-pattern-list
+    instruction: >
+      Fail if a second copy of the pattern list has drifted from this one.
+
+      This is the pack's core lesson made runnable, the way `hook-liveness` in
+      the hooks pack makes GUARD_DESIGN rule 1 runnable. On the origin machine a
+      redactor and a scanner kept separate lists; both lacked Telegram; a live
+      bot token survived a scan that reported all-clear. Neither list was wrong
+      on its own -- they were wrong TOGETHER, and nothing compared them.
+
+      Passes trivially if you have not installed the audit-log hook.
+    check:
+      type: contains
+      cmd: python packs/secret-hygiene/files/setup_secret_hygiene.py --check-drift
+      expect: "VERDICT: HEALTHY"
+    on_fail: >
+      Two pattern lists disagree. Do not reconcile by copying shapes across --
+      that recreates the drift. Point the audit-log hook's _SECRET_PATTERNS at
+      secret_patterns.py so there is one list with one place to add to.

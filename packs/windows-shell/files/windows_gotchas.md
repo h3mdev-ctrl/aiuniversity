@@ -189,3 +189,75 @@ This bites during a rollback: `ls -t *.bak | head -1` returns the wrong file, an
 you "restore" something that was never the previous state. Sort by filename if
 you timestamp them (`.bak-<name>-YYYYmmdd-HHMMSS`), or use `copy` instead of
 `copy2` when creation order is what matters.
+
+## 11. `Path.home().glob("**/*.ext")` walks your whole profile and never returns
+
+Scanning "everything under my home directory" reads like a small convenience and
+is not one. On a working machine `~/.claude` alone held 441 session transcripts
+and 200 MB+; a `**/*.jsonl` glob rooted at home hung past a two-minute timeout
+without producing a single byte, and had to be killed.
+
+The trap is that it looks bounded. `**` is not "a couple of levels" — it is every
+directory beneath the root, including `node_modules`, `.venv`, `AppData`, and
+every cache any tool has ever written there.
+
+```python
+# hangs
+for p in Path.home().glob("**/*.jsonl"): ...
+
+# bounded: name the roots, name the skips
+SKIP = {"projects", "node_modules", "__pycache__", "todos", "shell-snapshots"}
+for root in (home / ".claude", home / ".claude" / "state"):
+    for p in root.glob("*.jsonl"):          # note: not **
+        if any(part in SKIP for part in p.parts):
+            continue
+```
+
+Worth knowing twice over: this was written down as a rule on the machine it came
+from, and then walked into again the same day, in a one-liner where it did not
+feel like "a scan". If you type `**` under a home directory, that is the moment.
+
+## 12. Ad-hoc `python - <<PY` one-liners still hit cp1252 on stdout
+
+Gotcha 7 covers guarding `sys.stdout.reconfigure()`. The other half: a throwaway
+one-liner that prints text you did not author — a doc excerpt, a file's contents,
+a log line — will die on the first non-ASCII character:
+
+```
+UnicodeEncodeError: 'charmap' codec can't encode character '→'
+```
+
+An arrow in someone else's markdown is enough. The pipeline had run for twenty
+lines before it hit one, so the output looks fine right up until it isn't.
+
+Guard it in throwaway scripts too, not just the ones you keep:
+
+```python
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+```
+
+The `errors="replace"` matters: a console that genuinely cannot render a glyph
+should print `?` rather than take the script down.
+
+## 13. Heredoc + regex: escaping fights you, and the assertion lies
+
+Gotcha 9 covers heredocs mangling Python string literals. Regex source is the
+worst case, because a pattern is *already* full of backslashes and the heredoc
+eats a layer before Python sees it. Three symptoms, all seen in one session:
+
+- `SyntaxWarning: "\d" is an invalid escape sequence`
+- an `assert text.count(anchor) == 1` failing with **0** — the anchor you built
+  never matched, so a patch silently did nothing while reporting success
+- a literal `"` inside `r"..."` terminating the string early
+
+Two habits that end it:
+
+1. **Use the Write/Edit tool for anything containing regex**, not a shell heredoc.
+2. **Write quote characters as hex inside patterns** — `\x22` for `"`, `\x27`
+   for `'` — so no quote can terminate the string that holds them.
+
+And keep the `count(anchor) == 1` assertion regardless. A marker matching **0**
+times and a marker matching **3** times are both wrong, and both otherwise
+present as "applied cleanly".
