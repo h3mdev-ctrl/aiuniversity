@@ -59,6 +59,16 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
   the foreground log before assuming the daemon is doing anything; see
   `files/autopilot_worker_spawn_windows.md` for the diagnostic and both the
   source-level fix and the zero-source workaround.
+- ❌ **Diagnosing "the reranker isn't working" with `gbrain search`.** That verb
+  never invokes the reranker regardless of config -- only `gbrain query` does.
+  Testing with the wrong verb produces a false negative every time.
+- ❌ **Guessing at reranker config before reading its audit log.** It's
+  fail-open by design (`~/.gbrain/audit/rerank-failures-*.jsonl` names the
+  exact error) -- config changes are a shot in the dark until you've read it.
+- ❌ **Assuming `gbrain reindex` is single-threaded because `--help` doesn't
+  mention otherwise.** `--workers N` (default 1, recommended 4-8) is real and
+  undocumented in the generic help text; check the source, not just `--help`,
+  before assuming a flag doesn't exist.
 
 ## Related packs
 
@@ -67,3 +77,6 @@ See [pack-structure.md](../../docs/pack-structure.md) for the section convention
 - [`obsidian-wiki`](../obsidian-wiki/) — a wiki gbrain can ingest for semantic
   search; part of the same KNOWLEDGE branch.
 - [`foundation`](../foundation/) — threads gbrain-windows as `layer-4-capabilities`.
+- [`gbrain-local-reranker`](../gbrain-local-reranker/) — follow-on pack: replaces
+  the hosted ZeroEntropy reranker (shutting down 2026-09-04, and fail-open in
+  the meantime) with a free local `llama-server` instance. Run this pack first.

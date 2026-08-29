@@ -99,6 +99,40 @@ near the ceiling. A burst (like the cancel loop above) tips it over.
 > `cat` it. The port/mode question rarely needs the file; the error text already
 > tells you it's session mode.
 
+**Finding the standing consumers (item 3), concretely.** "Close sessions you
+don't need" is easy to say and hard to act on without a list. Every open
+Claude session that ever touched this brain keeps a `gbrain serve` process
+alive as long as its window exists — including sessions from days ago whose
+window is still technically open somewhere. Verified 2026-08-28: four
+`gbrain serve` instances from the previous evening (21:14, 22:13, 23:04,
+23:20) were still resident the next morning, each holding a pool slot, none
+doing anything useful.
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -match 'serve' -and $_.CommandLine -match 'gbrain' -and $_.Name -ne 'bun.exe'
+} | Select-Object ProcessId, CreationDate, ParentProcessId
+```
+
+Anything with a `CreationDate` well before your current work session is a
+candidate. Confirm its parent `claude.exe` is a window you actually still
+want before killing — a session mid-task loses its gbrain MCP tools for the
+rest of that window if you kill its `serve` process (they don't respawn
+mid-session; a fresh `/jarvis`-style restart or a new window picks it back
+up). Kill the process and its `bun.exe`/`conhost.exe` children together, the
+same way `byejarvis`-style cleanup reaps a voice-server tree.
+
+**A restarted supervisor can itself become an orphan.** If `gbrain jobs
+supervisor start` dies from `EMAXCONNSESSION` mid-lock-refresh (its own log
+shows `health_error … supervisor_lock_refresh_failed` → `supervisor_lock_lost`
+→ `stopped exit_code=4`), the **worker it spawned does not die with it** —
+`gbrain jobs supervisor status` will then show `Supervisor: not running`
+while still naming a live `Worker pid`. That worker is now unmanaged and
+still holding a connection. Find and stop it the same way as above (its
+command line matches `jobs work`), then restart the supervisor once the pool
+has actual headroom — restarting into the same exhausted pool just repeats
+the crash.
+
 ---
 
 ## Symptom: `gbrain doctor` shows N unacknowledged sync_failures that won't clear
@@ -137,16 +171,91 @@ gbrain doctor --fast    # → sync_failures: [OK] … all acknowledged
 
 ---
 
+## Symptom: search results look wrong and you can't tell if the reranker is even running
+
+Two different CLI verbs, one important difference: `gbrain search` (cheap
+hybrid, no LLM expansion) **never invokes the reranker, regardless of config
+or `--mode`.** Only `gbrain query` does — its own `--help` says autocut "is
+already ON when the reranker runs, which it does in the default search mode",
+meaning `query`, not `search`.
+
+**Symptom:** `gbrain models doctor` shows the reranker reachable, but
+`gbrain search "..." --json` never has a `rerank_score` field on any row, and
+the reranker's own request log shows zero incoming requests. This looks
+exactly like a broken reranker and isn't one — it's the wrong verb.
+
+**Fix:** test with `gbrain query`, not `gbrain search`, when diagnosing
+reranker behavior. Check which verb your actual callers use before concluding
+retrieval quality is the reranker's fault.
+
+**If `query` also shows no `rerank_score`:** check stderr for
+`N/N query embeds failed (salvaging survivors): query embed deadline 6000ms
+exceeded` — under load (e.g. a concurrent `gbrain reindex` sharing the same
+embedding model), the query-expansion step can time out and gbrain silently
+falls back to a lexical-only path *before the reranker is ever reached*. Same
+visible symptom, completely different cause — retry once the concurrent load
+clears rather than re-checking reranker config.
+
+**The reranker is fail-open — its own audit log is the fastest diagnostic.**
+Any reranker error (auth, network, timeout, malformed response) logs to
+`~/.gbrain/audit/rerank-failures-*.jsonl` with the exact model, doc count, and
+error class, and the caller never sees an error. Read this file before
+guessing at config:
+```bash
+tail -10 ~/.gbrain/audit/rerank-failures-*.jsonl
+```
+
+---
+
+## Undocumented flag: `gbrain reindex --workers N` (aka `--concurrency N`)
+
+`gbrain reindex --help` prints a generic one-liner and doesn't mention this,
+but the flag is real (found in `commands/reindex.ts`, not the help text):
+in-process parallel workers for the reindex sweep, default 1, recommended 4-8
+for a large brain. `PGLite` engines clamp to 1 regardless of what you pass.
+
+```bash
+gbrain reindex --markdown --workers 4
+```
+
+**It's genuinely idempotent** — each page bumps its `chunker_version` on
+success, so killing a reindex mid-run and re-launching (with or without
+`--workers`) resumes from wherever it left off, at no cost beyond the
+in-flight batch. Safe to kill and restart if you want to change worker count,
+free GPU memory for it first, or just suspect it's stalled.
+
+**Diminishing returns if the embedding backend itself serializes.** If your
+embedding model runs through Ollama, `OLLAMA_NUM_PARALLEL` (unset = Ollama's
+own VRAM-based heuristic, often 1 under tight VRAM) caps how many of those
+workers' embed calls actually run concurrently — `--workers 4` against an
+Ollama serializing to 1 still helps some (chunking + DB I/O overlap even
+while the embed call itself queues) but won't give you 4x. Raising
+`OLLAMA_NUM_PARALLEL` helps but trades context length for it (Ollama
+auto-shrinks `num_ctx` to fit the extra parallel KV cache — watch `ollama ps`
+after any restart to see what actually landed). And judge the resulting
+throughput from a clean window at least several minutes after any Ollama
+restart — model reload and cache warm-up in the first minutes can look like
+"the change didn't help" when it did.
+
+---
+
 ## The 5-minute runbook (all of the above, in order)
 
 1. `gbrain jobs stats` — WEDGED? `gbrain jobs supervisor status` — not running?
 2. `nohup gbrain jobs supervisor start > ~/.gbrain/supervisor-manual.log 2>&1 & disown`
    — **from git-bash**. Confirm `Supervisor: running`.
 3. Let the queue drain (watchdog reaps the debris). Don't loop-cancel.
-4. If `EMAXCONNSESSION` appears: stop hammering; raise `pool_size` *only* if
-   steady-state; **never switch to the transaction pooler**.
+4. If `EMAXCONNSESSION` appears: stop hammering; find stale `gbrain serve`
+   instances from old sessions (see the concrete PowerShell snippet above) and
+   any orphaned worker left by a supervisor that died mid-crash; raise
+   `pool_size` *only* if steady-state; **never switch to the transaction pooler**.
 5. Stale `<head>` sync_failures: back up + ack them in `sync-failures.jsonl`; verify
    with `gbrain doctor`.
+6. Search results look wrong / no `rerank_score`? Confirm you tested with
+   `gbrain query`, not `search` (only `query` fires the reranker) — then check
+   `~/.gbrain/audit/rerank-failures-*.jsonl` before touching config.
+7. A large reindex crawling? Try `gbrain reindex --markdown --workers 4`
+   (undocumented, not in `--help`) — it's idempotent, safe to kill and restart.
 
 See `example_gbrain_ops_resolver.md` for the resolver rows that make this manual
 discoverable from a plain-English symptom.

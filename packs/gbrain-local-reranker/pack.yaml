@@ -1,0 +1,205 @@
+# gbrain-local-reranker -- replace gbrain's hosted ZeroEntropy reranker with a
+# free, local llama-server + Qwen3-Reranker instance.
+#
+# WHY THIS EXISTS: ZeroEntropy's hosted endpoints (docs/ai-providers/zeroentropy.md)
+# shut down 2026-09-04. Worse, the reranker is FAIL-OPEN by design
+# (src/core/search/rerank.ts) -- a dead API key or a shutdown endpoint doesn't
+# error, it silently returns UNRANKED results. RETRIEVAL.md documents the
+# reranker as the single biggest ranking lever in the default pipeline (a
+# 20-query benchmark showed it reshuffles 60% of top-1 results) -- so "silently
+# off" is not a minor degradation, it's most of the pipeline's value gone with
+# no signal that anything changed. Verified 2026-08-28: a brain had been
+# running tokenmax-minus-its-reranker for at least a week with zero errors
+# surfaced anywhere a normal session would look.
+#
+# THIS IS A FOLLOW-ON PACK, not part of gbrain-windows core: it requires an
+# external download (a multi-GB GGUF), a second long-lived local server with
+# its own lifecycle, and a GPU. Most gbrain setups don't need it until the ZE
+# shutdown date; run gbrain-windows first, add this when you're ready.
+#
+# WHAT YOU NEED: an NVIDIA GPU with 4GB+ free VRAM (a 4B Q4_K_M reranker fits
+# in ~2.5GB), `curl`, and about 3GB of disk for the GGUF + llama-server binary.
+# GPU IS REQUIRED FOR INTERACTIVE USE -- CPU-only is NOT a viable fallback,
+# not just a slower one. Corrected 2026-08-28 after a second install (CPU-only,
+# integrated graphics, no NVIDIA card) measured a realistic 25-doc candidate
+# pool (~800 tokens/doc, matching real gbrain chunk length) failing to complete
+# within 3 minutes, at EVERY model size tried (4B and 0.6B both). Latency
+# scales worse than linearly with token volume (looked quadratic), not just
+# doc count -- the original "8-15s cold start" framing came from a tiny
+# synthetic test and never held for a real candidate pool. If you don't have a
+# GPU, skip this pack; a local CPU reranker will make gbrain feel broken, not
+# just slow.
+#
+# WINDOWS GOTCHAS: read files/windows_local_stack_gotchas.md before you start
+# if you're also running Ollama on the same box -- it covers 11 real traps hit
+# standing this up. THE ONE THAT MATTERS MOST (Trap 2b): llama-server clamps
+# its batch size to 512 tokens by default, which a synthetic few-sentence test
+# never hits but every real query does (20-30 real chunks easily exceeds it) --
+# and fixing it needs BOTH --batch-size/--ubatch-size AND --parallel 1 (the
+# default 4 slots divide/contend for batch capacity, causing intermittent
+# failures that look like a flaky bug even after raising the batch size alone).
+# Also covers: the `search` vs `query` CLI verb only one of which fires the
+# reranker, the fail-open audit log location, Ollama's tray app respawning an
+# unconfigured server, an Ollama-internal llama-server.exe surviving as an
+# orphan after its parent dies, VRAM/context tradeoffs from OLLAMA_NUM_PARALLEL,
+# a cold-start throughput trap, flaky multi-GB HuggingFace downloads that fail
+# silently mid-transfer, picking the right CUDA build for your driver, a
+# popular-but-broken community GGUF conversion, and why CPU-only isn't a
+# viable fallback for real candidate pools.
+#
+# LONG-LIVED SERVER: llama-server is a daemon, not a one-shot command. Give it
+# its own durable directory (NOT a git worktree -- worktrees get deleted out
+# from under long-running processes). Register it to survive reboot if you
+# want it always available.
+name: gbrain-local-reranker
+version: 0.1.0
+steps:
+  - id: server-running
+    instruction: >
+      Confirm llama-server is up and answering in reranking mode on its
+      configured port (default 8081). This is a raw HTTP check -- it proves
+      the process is alive and listening, not yet that it reranks correctly.
+    check:
+      type: endpoint_reachable
+      cmd: curl -sf http://127.0.0.1:8081/v1/models
+    on_fail: |
+      Nothing is answering on port 8081. Get llama-server running:
+
+      1. Download a prebuilt CUDA release from
+         https://github.com/ggml-org/llama.cpp/releases (match the CUDA build
+         number to what `nvidia-smi` reports your driver supports -- see Trap 9
+         in windows_local_stack_gotchas.md, the newest build is not always the
+         right pick). Extract it into its own durable directory.
+      2. Download a reranker GGUF from ONE OF THESE TWO SPECIFIC REPOS (not a
+         generic "search HuggingFace for a Qwen3-Reranker GGUF" -- see Trap 10
+         in windows_local_stack_gotchas.md for why that generic guidance broke
+         a real install):
+         - 4B: huggingface.co/gscoppino/Qwen3-Reranker-4B-GGUF-llama_cpp
+         - 0.6B: huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp
+         Use the verified-resume download loop in Trap 8 of
+         windows_local_stack_gotchas.md -- a plain `curl` can silently
+         truncate a multi-GB file.
+      3. Launch it with the FULL corrected flag set (Trap 2b -- the batch-size
+         and parallel flags are not optional, real queries fail intermittently
+         without both):
+         llama-server --model <path-to-gguf> --alias qwen3-reranker-4b --reranking --port 8081 --n-gpu-layers 99 --batch-size 4096 --ubatch-size 4096 --parallel 1
+         `--reranking` and `--embeddings` are mutually exclusive at launch.
+         `--alias` matters -- without it the model name in requests is the
+         full gguf path, which breaks the config string below. `--parallel 1`
+         matters because the default 4 slots divide batch capacity, causing
+         SOME real queries to fail even with a raised --batch-size.
+
+  - id: gbrain-wired
+    instruction: >
+      Confirm gbrain's config actually points at your local server instead of
+      ZeroEntropy's hosted API.
+    check:
+      type: contains
+      cmd: gbrain config get search.reranker.model
+      expect: llama-server-reranker
+    on_fail: |
+      gbrain is still configured for the hosted reranker (or none). Wire it:
+
+        gbrain config set provider_base_urls.llama-server-reranker http://127.0.0.1:8081/v1
+        gbrain config set search.reranker.model llama-server-reranker:qwen3-reranker-4b
+        gbrain config set search.reranker.enabled true
+
+      The string after the colon MUST equal your --alias from the server-running
+      step exactly.
+
+  - id: reachability-confirmed
+    instruction: >
+      Confirm gbrain itself can actually reach the model through its own model
+      registry -- not just that the raw HTTP endpoint answers.
+    check:
+      type: regex
+      cmd: gbrain models doctor
+      expect: "reranker_config\\s+\\S+\\s+ok"
+    on_fail: |
+      gbrain models doctor doesn't show the reranker as reachable. Common causes:
+
+      1. Reachability probe reports "network" status -- the server launched in
+         --embeddings mode instead of --reranking (mutually exclusive), or your
+         llama.cpp build is old enough to only serve /rerank, not /v1/rerank
+         (this recipe requires /v1/rerank -- update llama-server).
+      2. Cold-start timeout on CPU -- but see the WHAT YOU NEED note above
+         first: CPU-only doesn't just have a longer cold start, real candidate
+         pools can fail to complete at all (Trap 11 in windows_local_stack_gotchas.md). Raising the timeout
+         (gbrain config set search.reranker.timeout_ms 60000) buys headroom
+         but is not a fix for the underlying CPU-throughput problem.
+
+  - id: actually-reranks
+    instruction: >
+      THE real test. A server that answers HTTP 200 is not a server that
+      reranks correctly -- a wrong pooling head, tokenizer mismatch, or
+      truncated model file can all return a well-formed, useless response.
+      Sends a fixed relevant/irrelevant document triplet and asserts the
+      genuinely relevant one scores highest by a wide margin. This is the
+      exact check that first proved this setup was working (2026-08-28:
+      0.99 vs ~0.00002).
+    check:
+      type: command_succeeds
+      cmd: python packs/gbrain-local-reranker/files/verify_rerank_quality.py
+    on_fail: >
+      The server answers but isn't discriminating relevant from irrelevant
+      documents -- both scores near-zero and/or the irrelevant document
+      OUTSCORING the relevant one is the specific signature of Trap 10 (a GGUF
+      missing the cls.output.weight classifier-head tensor), NOT a
+      pooling/config bug -- switch to one of the two named-repo GGUFs above
+      before debugging anything else. If you're already on one of those repos,
+      re-check the GGUF's integrity (Trap 8 -- a truncated download can still
+      partially load): re-verify its byte count against the HuggingFace repo's
+      declared Content-Length and re-download if it doesn't match exactly.
+
+  - id: verify-in-real-usage
+    instruction: >
+      gbrain's `search` verb (cheap hybrid, no expansion) does NOT invoke the
+      reranker regardless of config -- only `query` does (Trap 1). Confirm the
+      verb you'll actually use in practice exercises the reranker end to end,
+      with a realistic candidate pool (a query with 15+ real matches) since
+      Trap 2b's batch limit only bites on real-sized inputs.
+    check:
+      type: command_succeeds
+      cmd: python packs/gbrain-local-reranker/files/verify_real_usage.py
+    on_fail: |
+      No rerank_score field appeared even via `query`. Most likely causes, in
+      order (2026-08-28 incident order -- Trap 2b was the actual root cause
+      after ruling out the other two):
+
+      1. THE BATCH-SIZE / SLOT-CONTENTION BUG (Trap 2b, most likely). Check
+         the audit log for "input (N tokens) is too large to process...
+         current batch size: 512": tail -5 ~/.gbrain/audit/rerank-failures-*.jsonl
+         Relaunch llama-server with the FULL corrected flag set -- --batch-size,
+         --ubatch-size, AND --parallel 1. Then run this same check 3-5 times in
+         a row (see stability-confirmed below) -- a single pass does not prove
+         this is fixed.
+      2. Concurrent load on the SAME Ollama instance used for query-expansion
+         embeddings (e.g. a running `gbrain reindex`) can time out the
+         expansion step and gbrain silently falls back to lexical-only before
+         the reranker is ever invoked (Trap 3). Check stderr for
+         "query embeds failed (salvaging survivors)" and retry once that load
+         clears, or add --no-expand to bypass expansion for this check.
+      3. Any other reranker failure that fails open -- the audit log entry's
+         error_summary names the exact cause.
+
+  - id: stability-confirmed
+    instruction: >
+      A single successful rerank does NOT prove Trap 2b is fixed -- the
+      slot-contention half of that bug is intermittent (the SAME query,
+      unchanged, failed on some calls and succeeded on others within a
+      two-minute window before --parallel 1 was added). Run the same real
+      query 3-5 times in a row and confirm a non-null rerank_score every time
+      before trusting this setup.
+    check:
+      type: command_succeeds
+      cmd: python packs/gbrain-local-reranker/files/verify_stability.py
+    on_fail: >
+      Intermittent failures across repeated identical calls confirm Trap 2b's
+      slot-contention cause. Confirm llama-server was launched with
+      --parallel 1 (not the default 4) -- check its command line:
+      `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq
+      'llama-server.exe' } | Select-Object CommandLine` (PowerShell). If
+      --parallel 1 is already set and failures persist, lower --batch-size /
+      --ubatch-size candidates further or reduce reranker_top_n_in
+      (gbrain config set search.reranker.top_n_in <N>) to shrink the
+      candidate pool per call.

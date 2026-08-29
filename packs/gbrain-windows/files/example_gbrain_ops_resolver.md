@@ -31,6 +31,8 @@ even before opening the page:
 | See `EMAXCONNSESSION` / "max clients reached in session mode"                                       | [gbrain_recovery_windows §pool] — stop the burst; raise `pool_size` only if steady-state; **never** switch to the transaction pooler (breaks session locks) |
 | `gbrain doctor` shows `<head>` sync_failures that `--skip-failed`/`--retry-failed` won't clear      | [gbrain_recovery_windows §sync_failures] — back up + acknowledge them directly in `~/.gbrain/sync-failures.jsonl` |
 | About to `kill` a "worker pid" gbrain reported                                                      | *verify the PID is actually gbrain first — PIDs recycle* (a reported worker pid was once a recycled Edge process) |
+| Search results look wrong / no `rerank_score` in `gbrain search --json` output                     | [gbrain_recovery_windows §reranker] — **`search` never fires the reranker; test with `query`** instead. Still nothing? Read `~/.gbrain/audit/rerank-failures-*.jsonl` before touching config |
+| A large `gbrain reindex --markdown` is crawling / taking hours                                      | [gbrain_recovery_windows §reindex] — try the undocumented `--workers 4` flag (not in `--help`); it's idempotent, safe to kill and relaunch |
 
 ## Conventions (the same three that make any resolver work)
 
