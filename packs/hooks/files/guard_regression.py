@@ -228,7 +228,14 @@ def load_user_suites() -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"! {p} is not readable JSON: {exc} -- ignoring", file=sys.stderr)
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    # JSON has no comments, and a cases file needs them badly: which guards are
+    # deliberately NOT covered, and why, is the most useful thing in it -- an absent
+    # suite otherwise reads as an oversight rather than a decision. `_`-prefixed keys
+    # are notes, not suites.
+    return {k: v for k, v in data.items()
+            if not k.startswith("_") and isinstance(v, dict)}
 
 
 def registered_guards() -> set[str]:
