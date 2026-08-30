@@ -12,7 +12,7 @@
 # Run guardrails first (foundation layer-3 does this).
 # Then install whichever hooks fit your workflow.
 #
-# BEFORE YOU WRITE OR EDIT A GUARD: read files/GUARD_DESIGN.md. Six rules, each
+# BEFORE YOU WRITE OR EDIT A GUARD: read files/GUARD_DESIGN.md. Eight rules, each
 # paid for with a real defect on a live machine (~30 hooks, 46,857 tool calls,
 # 441 sessions) inside a single day. The two that cost most:
 #
@@ -56,9 +56,17 @@ steps:
   - id: recon-before-build-fires
     instruction: >
       Prove the recon guard actually fires -- pipe a simulated first-Write-of-a-new-
-      file through the installed hook and confirm it exits non-zero with a BLOCKED
-      message. Also confirm that overwriting an existing file still passes (so it's
-      a real gate, not a wall).
+      file through the installed hook and confirm it exits 2. Also confirm the
+      near-misses still pass, so it is a real gate and not a wall: an existing-file
+      overwrite, a doc file, a fresh/sparse dir, a scratch/throwaway dir, and a
+      session that has ALREADY read something in the target directory.
+
+      The fixture needs a fake populated repo, and `tempfile` puts it in the OS temp
+      tree -- which this guard deliberately ignores, because 86 of 246 measured fires
+      were pointless nudges at the session scratchpad. The check therefore sets
+      CLAUDE_RECON_SELFTEST, which disables THAT exclusion and nothing else. Note the
+      direction: it can only make the guard fire MORE, so it is not a bypass, and one
+      case runs with it OFF to prove the exclusion it disables is real.
     check:
       type: command_succeeds
       cmd: python packs/guardrails/files/setup_recon_build_guard.py --test-blocking
@@ -91,6 +99,87 @@ steps:
       Run this after ANY hook edit and at every wrap-up. On the machine this came
       from, two hooks were dead at the same time for a full day and both were
       found by accident, not by anything reporting them.
+
+  - id: guard-correctness
+    instruction: >
+      Install the guard regression harness and confirm every guard you have
+      still CATCHES what it was built for. The doctor above answers "is this
+      hook alive?"; this answers "does it still fire on the thing it exists
+      for, and still ignore the near-miss?" A hook can be perfectly alive with
+      a matcher that no longer matches ANYTHING -- which is what a dark
+      advisory list looks like from the outside, and is exactly what happened
+      on the machine these rules came from when predicates were added to a list
+      the dispatch loop still called `.search()` on.
+
+      This is rule 6 of files/GUARD_DESIGN.md made runnable, the way
+      `hook-liveness` is rule 1. Run BOTH after any hook edit and at wrap-up.
+
+      Read the verdict line, not just the colour: a guard you have not
+      installed produces SKIPPED cases, never passing ones, and a hook you HAVE
+      registered with no cases is reported as UNCOVERED. Neither is a failure;
+      both are things you cannot claim you checked. Add your own cases in
+      $CLAUDE_HOME/guard_cases.json -- one per footgun you have actually hit,
+      each with the near-miss that must stay silent next to it.
+    check:
+      type: contains
+      cmd: python packs/hooks/files/guard_regression.py
+      expect: "VERDICT: HEALTHY"
+    on_fail: >
+      A FAIL means a footgun you have already hit is no longer caught. Run
+      `python packs/hooks/files/hook_doctor.py` FIRST -- a DEAD hook fails every
+      one of its cases, and that is a different repair from a matcher that
+      stopped matching. If the doctor is HEALTHY, the guard is alive and its
+      matcher has drifted: read the failing case, decide whether the rule or the
+      case is wrong, and fix that one. Never delete a case to get to green --
+      that is how a guard goes dark without anyone noticing.
+
+  - id: windows-composition-guard
+    instruction: >
+      Windows only. The `windows-shell` pack DOCUMENTS the shell-composition
+      traps (heredocs mangling Python string literals, PowerShell here-strings
+      pasted into bash, `$_` pre-expanded by bash before PowerShell sees it,
+      text=True with no encoding=). Documentation cannot reach any of them: they
+      are mistakes made WHILE COMPOSING A TOOL CALL, mid-turn, and a rule read at
+      the start of a turn has no attachment point there. This installs the
+      enforcement half.
+
+      Blocks the three compositions that are already broken before they run --
+      each has a correct alternative that is always available, so there is no
+      bypass -- and advises on the code patterns that bite later.
+
+      Installs: <CLAUDE_HOME>/hooks/windows_quirk_guard.py  +
+                PreToolUse(Bash|PowerShell|Write|Edit) in settings.json.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_windows_quirk_guard.py --check-hook-file
+    fix: python packs/guardrails/files/setup_windows_quirk_guard.py
+    on_fail: >
+      Hook file missing. Install it (idempotent):
+        python packs/guardrails/files/setup_windows_quirk_guard.py
+      Then prove it fires AND stays quiet:
+        python packs/guardrails/files/setup_windows_quirk_guard.py --test-blocking
+      Not on Windows? Skip this step -- every rule in it is a Windows or
+      Windows-shell fact, and installing it elsewhere buys you nothing.
+
+  - id: windows-composition-guard-fires
+    instruction: >
+      Prove it, both directions. The positive cases are worthless on their own:
+      a guard that blocked every command would pass all three. So the same run
+      asserts the near-misses stay SILENT -- a valid heredoc, a prose heredoc
+      feeding `git commit -F -`, an ordinary command, and a .md file that merely
+      DESCRIBES the traps. That last one is not hypothetical: an earlier version
+      scanned prose the way it scanned code and fired three times on a docs page
+      explaining these very rules. A guard that cries wolf on its own
+      explanation gets ignored.
+    check:
+      type: command_succeeds
+      cmd: python packs/guardrails/files/setup_windows_quirk_guard.py --test-blocking
+    on_fail: >
+      The guard misbehaved on a known case -- the output names which one and in
+      which direction. A missed BLOCK means the matcher drifted; a fired ALLOW
+      means it is too broad and will be ignored within a week (GUARD_DESIGN
+      rule 3). Reinstall, then re-run:
+        python packs/guardrails/files/setup_windows_quirk_guard.py
 
   - id: session-end
     instruction: >

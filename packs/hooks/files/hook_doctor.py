@@ -12,7 +12,7 @@ On 2026-08-27/28 two hooks were dead at once and neither announced it:
   * memory_recall's `retrieval_count` update had been throwing
     `no such column: fact_id` into a bare `except` for WEEKS. The counter read
     0, which is exactly what a counter for something that never happened reads.
-  * win11_quirk_guard crashed with `AttributeError: 'function' object has no
+  * windows_quirk_guard crashed with `AttributeError: 'function' object has no
     attribute 'search'` on EVERY Bash/Write/Edit call, because a deploy claimed
     to patch the dispatch loop and silently missed its anchor. PreToolUse treats
     the resulting exit 1 as a non-blocking error, so work continued and nothing

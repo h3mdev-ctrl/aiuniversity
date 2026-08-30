@@ -1,6 +1,6 @@
 # Designing a guard that survives contact
 
-Six rules, each paid for with a real defect on a live machine in a single day.
+Eight rules, each paid for with a real defect on a live machine in a single day.
 They are ordered by how expensive the lesson was.
 
 The setting: ~30 hooks, 46,857 tool calls across 441 sessions. Two of the hooks
@@ -14,7 +14,8 @@ by a well-intentioned fix. None of it announced itself.
 Silence is both the success signal and the failure signal, so you cannot tell
 them apart by watching.
 
-`win11_quirk_guard` crashed on **every** Bash/Write/Edit call for a day:
+`windows_quirk_guard` (shipped by this pack) crashed on **every**
+Bash/Write/Edit call for a day:
 
 ```
 AttributeError: 'function' object has no attribute 'search'
@@ -93,6 +94,16 @@ matching. Newer guards had not inherited the lesson.
 would mine approval history for an allowlist. Never auto-apply; propose, and
 never propose loosening a destructive class.
 
+**And partition the fires before you read the rate.** The recon-before-build guard
+had 246 fires across 156 sessions. As one number that says "busy", and busy is
+ambiguous. Split by target directory and two separate problems fall out: 93 (38%)
+were aimed at throwaway dirs — 86 of them the session scratchpad the system prompt
+*instructs* Claude to use — and the remaining 153 fired whether or not the recon
+had actually happened, because the guard had no way to know. So its "hit rate" was
+really "how often does someone create a new source file", which for an active
+builder should be often. **It could never trend to zero, and a metric that cannot
+improve cannot be managed.** Both fixes came from the partition, not the total.
+
 ---
 
 ## 4. Fail closed only where a failure is irreversible
@@ -156,11 +167,25 @@ Two layers, and you need both:
 
 - **liveness** — is it firing at all? (`hook_doctor.py`)
 - **correctness** — does it still catch what it was built for, and still ignore
-  what it should? One case per footgun you have actually hit, each with its
-  negative control.
+  what it should? (`guard_regression.py`) One case per footgun you have
+  actually hit, each with its negative control. A guard you have not installed
+  must report SKIPPED there, never a pass — an all-green run made of skips is
+  the same lie as a dark matcher.
 
 A hook can pass liveness with a matcher that no longer matches anything. That is
 exactly what a dark advisory list looks like from the outside.
+
+**And the correctness harness inherits the same trap.** Half its cases assert
+*silence* — the near-misses that must not fire. A guard that has crashed is also
+silent, so those cases pass against a completely dead hook, and the harness
+reports green on nothing. The fix is to make the harness reject the third answer:
+`PreToolUse` defines only `0` (allow) and `2` (block), so **any other exit is
+BROKEN, not quiet** — fail the case on the exit code before ever judging the
+output.
+
+That defect was in `guard_regression.py` as first written. Nothing in reading it
+showed the hole; the test that killed a guard on purpose and demanded every one
+of its cases go red found it in one run. Write that test.
 
 ---
 
@@ -228,6 +253,47 @@ the very grep pattern it was written to ignore. Neither was visible on reading.
 
 ---
 
+## 8. Detect the symptom, not the cause
+
+A guard fires at one specific instant: the moment the tool call is made. By then
+much of the causal story has already happened, and the evidence you were planning
+to match on may not exist any more.
+
+Concrete case. Writing Python through a shell heredoc mangles a `\n` inside a
+string literal into a real newline, splitting the literal. The obvious guard
+matches on a backslash-`n` inside a heredoc. It fires on **nothing** — because by
+the time a hook sees the command, the shell has already done the substitution.
+The cause is gone; only its effect is on the wire.
+
+The guard that works does not look for the mangling at all. It runs
+`ast.parse()` on the heredoc body and blocks if it will not compile — which
+catches that mangling **and every other way heredoc'd Python arrives broken**,
+including ways nobody has hit yet.
+
+Two things follow:
+
+- **Match on the end state, not the mechanism.** "This will not parse" is
+  checkable, stable, and does not depend on knowing which of six escaping layers
+  ate your backslash. "Someone probably typed `\n`" is a story about the past.
+- **A symptom-matcher generalises for free; a cause-matcher needs a new rule per
+  cause.** That is why one `ast.parse` outperformed a growing list of escape
+  patterns.
+
+The trap has a tell. When the very same file says so — the guard above carried a
+comment reading *"by the time a hook sees the command the `\n` has ALREADY become
+a real newline"* — and a cause-matcher gets written anyway, the miss is not
+subtle knowledge, it is not having read the thing being extended. Recon applies
+to the guard you are modifying, not only to the code you are adding.
+
+And when you extend a guard this way, ask what shape the new rule is blind to by
+construction. The body-parsing rule above is blind to a heredoc whose body is
+valid Python but whose triple-quoted **payload** — code on its way to another
+file — is broken. Same class of bug, one layer removed, invisible to the rule
+that was built for it. Blindness by construction is not a bug in the rule; it is
+a second rule waiting to be written.
+
+---
+
 ## A corollary: a pattern list is an allowlist of things you remembered
 
 A redactor and a log scanner were maintained as two separate pattern lists.
@@ -246,7 +312,7 @@ what the redactor could not name.
 
 ---
 
-## The shape underneath all seven
+## The shape underneath all eight
 
 Every one is the same failure: **a component that cannot report its own
 brokenness.** A dead hook, a dead counter, a dark matcher, a blinded scan, a
