@@ -123,7 +123,7 @@ def _under_os_temp(path: pathlib.Path) -> bool:
     """True if the target lives under the OS temp tree -- which is where Claude Code's
     per-session scratchpad is, and the single largest source of pointless fires
     (86 of 246 measured). Resolved rather than string-matched so a Windows 8.3
-    short path (C:\\Users\\ANDRE~1\\...) still matches its long form.
+    short path (C:\\Users\\LONGNA~1\\...) still matches its long form.
 
     CLAUDE_RECON_SELFTEST disables this one exclusion, because a test fixture has
     to build a fake populated repo somewhere and `tempfile` puts it in exactly the
