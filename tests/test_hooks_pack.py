@@ -161,6 +161,84 @@ def test_selftest_delegation_runs_for_the_recon_guard(tmp_path):
     assert sel and all(c["status"] == "pass" for c in sel), sel
 
 
+# --- scope declaration and per-case cwd -------------------------------------
+
+
+def test_excluded_hooks_leave_uncovered_but_are_reported_with_a_reason(tmp_path):
+    """A stated reason moves a hook out of UNCOVERED -- and must still be VISIBLE.
+
+    The point is not to make the list shorter. It is that UNCOVERED should mean
+    'nobody has decided about this', so that a real gap cannot hide among hooks
+    that were deliberately left alone.
+    """
+    install_all(tmp_path)
+    settings = tmp_path / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"]["PreToolUse"].append(
+        {"hooks": [{"type": "command", "command": 'python "/x/notifier.py"'}]})
+    data["hooks"]["PreToolUse"].append(
+        {"hooks": [{"type": "command", "command": 'python "/x/undecided.py"'}]})
+    settings.write_text(json.dumps(data), encoding="utf-8")
+
+    doc = json.loads(regression(tmp_path, "--json").stdout)
+    assert "notifier.py" in doc["uncovered"] and "undecided.py" in doc["uncovered"]
+
+    (tmp_path / "guard_cases.json").write_text(json.dumps({
+        "_EXCLUDE": {"notifier.py": "side effect is the job -- would post for real"}
+    }), encoding="utf-8")
+
+    doc = json.loads(regression(tmp_path, "--json").stdout)
+    assert "notifier.py" not in doc["uncovered"]
+    assert "undecided.py" in doc["uncovered"], "an undeclared hook must stay UNCOVERED"
+    assert "post for real" in doc["excluded"]["notifier.py"]
+
+
+def test_exclusion_does_not_silence_a_guard_that_has_cases(tmp_path):
+    """Cases win over an exclusion -- otherwise a stray _EXCLUDE entry could
+    quietly stop a covered guard from ever being exercised again."""
+    install_all(tmp_path)
+    (tmp_path / "guard_cases.json").write_text(json.dumps({
+        "_EXCLUDE": {"credential_guard.py": "should not take effect"}
+    }), encoding="utf-8")
+    doc = json.loads(regression(tmp_path, "--json").stdout)
+    cred = [c for c in doc["results"] if c["guard"] == "credential_guard.py"]
+    assert cred and all(c["status"] == "pass" for c in cred)
+
+
+def test_case_cwd_is_honoured(tmp_path):
+    """Some hooks resolve their inputs from the process cwd, not the payload."""
+    install_all(tmp_path)
+    probe = tmp_path / "hooks" / "cwd_probe.py"
+    probe.write_text("import os, sys\nsys.stdin.read()\nprint(os.getcwd())\n",
+                     encoding="utf-8")
+    workdir = tmp_path / "somewhere_particular"
+    workdir.mkdir()
+    (tmp_path / "guard_cases.json").write_text(json.dumps({
+        "cwd_probe.py": {"cases": [
+            {"label": "runs in the pinned directory", "event": "PreToolUse",
+             "tool": "Bash", "input": {"command": "x"}, "cwd": str(workdir),
+             "expect": "advise", "contains": "somewhere_particular"},
+        ]}
+    }), encoding="utf-8")
+    doc = json.loads(regression(tmp_path, "--json").stdout)
+    probe_results = [c for c in doc["results"] if c["guard"] == "cwd_probe.py"]
+    assert probe_results and probe_results[0]["status"] == "pass", probe_results
+
+
+def test_notes_and_malformed_entries_do_not_break_the_loader(tmp_path):
+    install_all(tmp_path)
+    (tmp_path / "guard_cases.json").write_text(json.dumps({
+        "_README": ["a list, not a suite"],
+        "_EXCLUDE": "not a dict either",
+        "_notes": {"free": "form"},
+    }), encoding="utf-8")
+    r = regression(tmp_path, "--json")
+    assert r.returncode == 0, r.stdout + r.stderr
+    doc = json.loads(r.stdout)
+    assert doc["verdict"] == "HEALTHY"
+    assert all(not c["guard"].startswith("_") for c in doc["results"])
+
+
 # --- the recon guard's scratch + recon-evidence conditions ------------------
 
 

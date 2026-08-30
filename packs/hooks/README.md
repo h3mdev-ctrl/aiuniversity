@@ -104,6 +104,11 @@ constitution for a while and still get skipped. That's the signal to install.
 - **Fail open on unexpected errors.** A guard that exits non-zero on bad input silently
   breaks every matched tool call. All hooks here wrap logic in `try/except Exception:
   return 0`.
+- **Never write a regression case for a hook whose job is a side effect.** A case for
+  a notifier posts a real message; one for an auto-committer makes a real commit; one
+  for a brain-writer leaves synthetic pages behind. Declare those in `_EXCLUDE` with the
+  reason. On the machine this came from, 16 of 34 registered hooks are in that class —
+  they are plumbing or effects, not judgements, and `hook_doctor` already proves they run.
 - **A skipped case is not a passing case.** `guard_regression.py` reports a guard you
   haven't installed as SKIPPED and a hook you *have* registered with no cases as
   UNCOVERED. Read the verdict line, not the colour — an all-green run made entirely

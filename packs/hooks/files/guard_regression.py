@@ -56,6 +56,22 @@ the near-miss that must stay silent. A suite of positives alone will happily
 pass a guard that blocks everything, which GUARD_DESIGN rule 3 says is already
 dead.
 
+A case may also pin `"cwd"`, for a hook that resolves its inputs from the process
+working directory rather than the payload. Without it such a hook is untestable
+and gets excluded -- which is exactly how a retriever going dark stays invisible.
+
+DECLARING WHAT YOU ARE *NOT* COVERING
+-------------------------------------
+`"_EXCLUDE": {"<hook>.py": "<reason>"}` moves a hook out of UNCOVERED and prints
+the reason instead. This is not a way to make the list shorter: UNCOVERED should
+mean "nobody has decided about this", so a real gap cannot hide among hooks that
+were deliberately left alone. A guard that has cases is still exercised even if
+someone also lists it here.
+
+The reason that matters most: **a hook whose job IS a side effect must never be
+driven by a harness.** A case for a notifier posts a real message; a case for an
+auto-committer makes a real commit. Say that, and move on.
+
 `expect` is one of:
     block   -- exit 2
     allow   -- exit 0 and nothing said
@@ -219,7 +235,7 @@ EVENT_DEFAULTS = {
 }
 
 
-def load_user_suites() -> dict:
+def load_user_file() -> dict:
     p = base_dir() / "guard_cases.json"
     if not p.is_file():
         return {}
@@ -228,7 +244,33 @@ def load_user_suites() -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"! {p} is not readable JSON: {exc} -- ignoring", file=sys.stderr)
         return {}
-    if not isinstance(data, dict):
+    return data if isinstance(data, dict) else {}
+
+
+def load_exclusions(raw: dict) -> dict:
+    """`_EXCLUDE`: {hook: reason} -- hooks deliberately left uncovered.
+
+    A hook with no cases is reported UNCOVERED, which is the right default: you
+    cannot claim to have checked it. But some SHOULD stay uncovered, and lumping
+    those in with the genuinely-unexamined ones makes the list noise that gets
+    skimmed -- at which point a real gap hides in it.
+
+    Declaring a reason is not the same as excusing it. The reason is PRINTED, so
+    "no case for this" stays a decision someone made and can be argued with,
+    rather than an omission nobody noticed.
+
+    The reason that matters most: a hook whose job IS a side effect must never be
+    driven by a test harness. A regression case for a notifier posts a real
+    message; one for an auto-committer makes a real commit.
+    """
+    ex = raw.get("_EXCLUDE")
+    if not isinstance(ex, dict):
+        return {}
+    return {k: str(v) for k, v in ex.items() if isinstance(k, str)}
+
+
+def load_user_suites(data: dict) -> dict:
+    if not data:
         return {}
     # JSON has no comments, and a cases file needs them badly: which guards are
     # deliberately NOT covered, and why, is the most useful thing in it -- an absent
@@ -273,13 +315,18 @@ def build_payload(case: dict) -> dict:
     return base
 
 
-def run_hook(guard: pathlib.Path, payload: dict, timeout: int = 25):
+def run_hook(guard: pathlib.Path, payload: dict, timeout: int = 25, cwd: str | None = None):
     """Bytes in, bytes out. Text mode would route stdin through the locale codec
     on Windows and hang the writer thread on the first non-ASCII byte -- itself
     one of the footguns these guards exist to catch."""
+    # A case may pin `cwd`: some hooks resolve their inputs from the PROCESS working
+    # directory rather than the payload -- a memory retriever that finds its store by
+    # hashing cwd, for instance, is correctly silent when run from anywhere else. Without
+    # this, such a hook is untestable and gets excluded, which is how a retriever going
+    # dark stays invisible.
     p = subprocess.run([sys.executable, str(guard)],
                        input=json.dumps(payload).encode("utf-8"),
-                       capture_output=True, timeout=timeout)
+                       capture_output=True, timeout=timeout, cwd=cwd)
     # Advisories are JSON on STDOUT; blocks write to STDERR. Read both -- an
     # earlier harness read only stderr, scored every advisory as silent, and
     # made a perfectly good detector look dead.
@@ -351,9 +398,11 @@ def run_selftest(spec, results: list, guard_name: str) -> None:
 
 
 def main() -> int:
+    raw = load_user_file()
     suites = dict(SUITES)
-    for name, spec in load_user_suites().items():
+    for name, spec in load_user_suites(raw).items():
         suites[name] = spec                      # user cases override built-ins
+    excluded = load_exclusions(raw)
     installed = registered_guards()
 
     results: list[tuple[str, str, str, str]] = []
@@ -370,7 +419,7 @@ def main() -> int:
             continue
         for case in spec.get("cases", []):
             try:
-                rc, out = run_hook(path, build_payload(case))
+                rc, out = run_hook(path, build_payload(case), cwd=case.get("cwd"))
             except Exception as exc:                                # noqa: BLE001
                 results.append(("fail", guard_name, case["label"], f"harness error: {exc}"))
                 continue
@@ -379,7 +428,8 @@ def main() -> int:
         if spec.get("selftest"):
             run_selftest(spec["selftest"], results, guard_name)
 
-    uncovered = sorted(n for n in installed if n not in suites)
+    uncovered = sorted(n for n in installed if n not in suites and n not in excluded)
+    excluded_here = sorted(n for n in installed if n in excluded)
 
     n_fail = sum(1 for s, *_ in results if s == "fail")
     n_skip = sum(1 for s, *_ in results if s == "skip")
@@ -390,6 +440,7 @@ def main() -> int:
             "results": [{"status": s, "guard": g, "label": l, "detail": d}
                         for s, g, l, d in results],
             "uncovered": uncovered,
+            "excluded": {n: excluded[n] for n in excluded_here},
             "passed": n_pass, "failed": n_fail, "skipped": n_skip,
             "verdict": "HEALTHY" if not n_fail else "REGRESSED",
         }, indent=2))
@@ -412,10 +463,19 @@ def main() -> int:
     print("-" * 78)
     print(f"{len(results)} cases: {n_pass} pass, {n_fail} FAIL, {n_skip} skipped "
           f"(guard not installed -- NOT a pass)")
+    if excluded_here:
+        print(f"OUT OF SCOPE: {len(excluded_here)} registered hook(s), by declaration in "
+              f"guard_cases.json")
+        if VERBOSE:
+            for n in excluded_here:
+                print(f"             {n:32} {excluded[n]}")
+        else:
+            print("             (run --verbose to see the reason given for each)")
     if uncovered:
-        print(f"UNCOVERED: {len(uncovered)} registered hook(s) have no cases here -- "
-              f"{', '.join(uncovered)}")
-        print("           Add cases in $CLAUDE_HOME/guard_cases.json; see this file's docstring.")
+        print(f"UNCOVERED: {len(uncovered)} registered hook(s) have no cases and no stated "
+              f"reason -- {', '.join(uncovered)}")
+        print("           Either add cases in $CLAUDE_HOME/guard_cases.json, or say why not")
+        print("           in its \"_EXCLUDE\" map. Undecided is the one state worth fixing.")
     if n_fail:
         print("\nA FAIL means a footgun you have ALREADY hit is no longer caught.")
         print("Run hook_doctor.py first -- a DEAD hook fails every one of its cases,")

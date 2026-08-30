@@ -120,6 +120,14 @@ steps:
       both are things you cannot claim you checked. Add your own cases in
       $CLAUDE_HOME/guard_cases.json -- one per footgun you have actually hit,
       each with the near-miss that must stay silent next to it.
+
+      Drive UNCOVERED to zero, but not by writing a case for everything. Most
+      registered hooks are not guards, and some must NEVER be driven by a
+      harness: a case for a notifier posts a real message, one for an
+      auto-committer makes a real commit. Put those in the file's "_EXCLUDE"
+      map with the reason, which is then printed. The goal is that UNCOVERED
+      means "nobody has decided about this" -- so a real gap cannot hide among
+      hooks that were deliberately left alone.
     check:
       type: contains
       cmd: python packs/hooks/files/guard_regression.py
