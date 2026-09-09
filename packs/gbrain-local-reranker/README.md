@@ -19,7 +19,7 @@ model size. If you don't have a free NVIDIA GPU, skip this pack. Run
 
 See [pack-structure.md](../../docs/pack-structure.md) for the section
 conventions, and [files/windows_local_stack_gotchas.md](files/windows_local_stack_gotchas.md)
-for the 11 real traps hit standing this up — read it first if Ollama also runs
+for the 15 real traps hit standing this up — read it first if Ollama also runs
 on this box. **The one that actually mattered (Trap 2b):** llama-server clamps
 its batch size to 512 tokens by default. A synthetic test with 2-3 short
 sentences never gets close to that limit and looks perfect; every real query
@@ -54,6 +54,14 @@ except the fail-open audit log.
 
 ## Iron Laws
 
+- **Budget the WHOLE GPU, not one process.** Three things compete for the
+  card and all three must have their context pinned or they evict each other:
+  the embedder, gbrain's expansion LLM (loaded on EVERY query), and the
+  reranker's batch/context buffers. Ollama sizes a model by its `num_ctx`,
+  not its actual use — an unpinned 0.6B embedder is predicted at 6.6GB and
+  evicts itself on every call, which silently kills the vector arm while the
+  reranker sits healthy and uncalled. Traps 12-14.
+
 - **A server that answers is not a server that reranks, and one successful
   rerank is not a stable setup.** Every step up to `actually-reranks` can pass
   on a broken model; `actually-reranks` itself can pass once and then fail on
@@ -87,6 +95,16 @@ except the fail-open audit log.
   this pack expecting CPU to "just be slower."
 
 ## Anti-Patterns
+
+- ❌ **Trusting `gbrain config set` because it printed `Set ...`.** It writes
+  the DB plane, which the on-disk config file silently shadows. Always
+  `config get` afterwards and read the `source:` line. Separately,
+  `search.expansion=false` resolves correctly and does nothing — only the
+  `--no-expand` flag suppresses expansion. Trap 15.
+
+- ❌ **Assuming embed starvation needs concurrent load to reproduce.** It
+  fires on an idle box, on every single query, for a structural reason.
+  Trap 13.
 
 - ❌ **Trusting `gbrain models doctor` alone as proof the reranker works.** It
   confirms reachability, not correctness — always run the `actually-reranks`

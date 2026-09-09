@@ -17,7 +17,11 @@
 # its own lifecycle, and a GPU. Most gbrain setups don't need it until the ZE
 # shutdown date; run gbrain-windows first, add this when you're ready.
 #
-# WHAT YOU NEED: an NVIDIA GPU with 4GB+ free VRAM (a 4B Q4_K_M reranker fits
+# WHAT YOU NEED: an NVIDIA GPU. 4GB+ free VRAM is enough ONLY if the card is
+# otherwise idle; if Ollama also serves your embedder and gbrain's expansion
+# LLM from the same GPU, budget the WHOLE card and pin every model's num_ctx
+# (Traps 12-14) -- a working 8GB split is ~5.7GB across all three. (A 4B
+# Q4_K_M reranker fits
 # in ~2.5GB), `curl`, and about 3GB of disk for the GGUF + llama-server binary.
 # GPU IS REQUIRED FOR INTERACTIVE USE -- CPU-only is NOT a viable fallback,
 # not just a slower one. Corrected 2026-08-28 after a second install (CPU-only,
@@ -31,7 +35,7 @@
 # just slow.
 #
 # WINDOWS GOTCHAS: read files/windows_local_stack_gotchas.md before you start
-# if you're also running Ollama on the same box -- it covers 11 real traps hit
+# if you're also running Ollama on the same box -- it covers 15 real traps hit
 # standing this up. THE ONE THAT MATTERS MOST (Trap 2b): llama-server clamps
 # its batch size to 512 tokens by default, which a synthetic few-sentence test
 # never hits but every real query does (20-30 real chunks easily exceeds it) --
