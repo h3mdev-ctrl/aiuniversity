@@ -98,6 +98,14 @@ candidate set, and this produces the SAME symptom as Trap 1 (no
 `[gbrain] N/N query embeds failed (salvaging survivors)` in stderr before
 concluding the reranker itself is broken.
 
+> **Sharpened 2026-09-09 — "under load" is too narrow, and that framing costs
+> hours.** On an idle single-user box with nothing else running, EVERY
+> `gbrain query` starved its own embeds. The real mechanism is structural, not
+> contention: the expansion LLM loads onto the GPU per query (**Trap 13**) and
+> Ollama then evicts the embedder because it sizes models by `num_ctx` rather
+> than actual use (**Trap 12**). Read those two before assuming you need load
+> to reproduce this.
+
 ## Trap 4: killing `ollama.exe` does NOT kill its `llama-server.exe` child
 
 Ollama runs its own internal `llama-server.exe` (from
@@ -240,3 +248,197 @@ Raising `search.reranker.timeout_ms` or shrinking `search.reranker.top_n_in`
 buys some headroom but does not fix the underlying throughput gap — a local
 CPU reranker will make gbrain feel broken (queries that never return) rather
 than merely slow.
+
+## Trap 12: Ollama sizes VRAM from `num_ctx`, not actual use — an unpinned model evicts itself on every call
+
+Verified 2026-09-09. This is the root cause behind most of Trap 3, and it is
+invisible unless you read Ollama's own server log.
+
+Ollama decides whether a model fits by **predicting** memory from its context
+length, not by measuring what the model needs. A 0.6B embedding model
+(`qwen3-embedding:0.6b`, ~600MB of weights) loaded at Ollama's default
+`num_ctx=16384` is predicted at **6.6 GiB**:
+
+```
+msg="llama-server model predicted to exceed available memory, evicting"
+predicted="6.6 GiB"  predicted_num_ctx=16384  available="3.4 GiB"
+```
+
+On an 8GB card that means the embedder is evicted and cold-reloaded **on every
+single embed call**. Each cold load costs ~2.6s; a warm one costs ~50ms. Since
+`gbrain query` issues **3** query embeds against **one** 6000ms deadline,
+3 × 2.6s blows it every time, gbrain drops the vector arm, and search silently
+degrades to keyword-only — with a reranker that is up, healthy and never called.
+
+**The tell:** `ollama ps` is EMPTY right after a gbrain call but populated after
+a hand-rolled `curl` to the same endpoint. Same server, same model, different
+caller, opposite behaviour. `OLLAMA_KEEP_ALIVE=2h` does NOT prevent this — the
+eviction is a fit decision, not a keep-alive expiry, so keep-alive looks
+correctly set while the model is evicted anyway.
+
+**Fix — pin `num_ctx` per model via a Modelfile, keeping the SAME tag** so the
+brain's existing embeddings stay valid (same weights, same vectors, only a
+runtime parameter added):
+
+```bash
+ollama show --modelfile qwen3-embedding:0.6b > modelfile.bak   # restore path
+printf 'FROM <blob-path-from-the-backup>\nTEMPLATE {{ .Prompt }}\nPARAMETER num_ctx 8192\n' > Modelfile
+ollama create qwen3-embedding:0.6b -f Modelfile
+```
+
+Measured effect: predicted 6.6 GiB → **1.0 GiB**, reserved size 3.8GB → 2.9GB,
+model stays resident, embeds drop to 30–50ms.
+
+**Do NOT reach for `OLLAMA_CONTEXT_LENGTH`** to fix this — it is global and
+would shrink every chat model on the box too (see Trap 6 for why a silently
+shrunk context is a truncation risk on long content). Pin per model.
+
+Pick the context from your real chunk size, not the model's native max: 8192
+covers any realistic gbrain chunk with headroom. 4096 also worked and saved
+another 500MB, but leaves less margin for a long chunk on a re-embed.
+
+## Trap 13: gbrain's expansion LLM shares the GPU and loads PER QUERY — it, not the reranker, is usually what starves the embedder
+
+Verified 2026-09-09. Trap 3 says embeds can starve "under load, e.g. a
+concurrent reindex". That framing is too narrow and sent a whole session
+chasing the wrong thing: on a single-user idle box, with nothing else running,
+**every** `gbrain query` starved its own embeds.
+
+Cause: gbrain's `models.default` is the LLM used for multi-query expansion, and
+it is called on EVERY search. Check what it actually resolves to:
+
+```bash
+gbrain config get models.default
+```
+
+On this box it was `openai:gpt-4o-mini` — which, with `OPENAI_BASE_URL` pointed
+at local Ollama, is served by a local Ollama tag of the same name that pointed
+at **llama3.1:8b**. So each query loaded a ~5.4GB chat model onto the GPU,
+`available` dropped to 1.1 GiB, and the embedder was evicted per Trap 12. The
+reranker (370MB) was never the problem.
+
+**Confirm it is the expansion call**, not the reranker, before changing
+anything — the log shows the ordering plainly:
+
+```
+POST "/v1/responses"          <- expansion LLM loads (5-6s)
+available="1.1 GiB"           <- GPU now full
+"...predicted to exceed available memory, evicting"
+POST "/v1/embeddings"  499    <- embed gives up
+```
+
+**Fix:** point `models.default` at a small, context-pinned local model. Do NOT
+re-point the shared `gpt-4o-mini` Ollama tag — that silently changes every
+consumer of the alias on the box:
+
+```bash
+ollama pull llama3.2:1b
+printf 'FROM llama3.2:1b\nPARAMETER num_ctx 4096\n' > Modelfile
+ollama create llama3.2-1b-4k -f Modelfile
+gbrain config set models.default openai:llama3.2-1b-4k
+```
+
+Use the `openai:` prefix, never `ollama:` — gbrain's native ollama recipe is
+embed-only and silently will not serve chat.
+
+**Is a 1B good enough?** For expansion it is a utility-tier task (gbrain's own
+help calls it "a Haiku call per search"). The heavyweight local paths are
+already off: dream's deep extract is structural-only and `propose_takes` is
+Anthropic-only, so `models.default` is in practice the expansion model and
+little else. Expansion *quality* on a 1B is untested — the variants it writes
+are weaker than an 8B's; measure with `gbrain eval` if it matters to you.
+
+Measured effect, 6-run gate at the DEFAULT 6000ms embed deadline:
+**0/5 PASS → 6/6 PASS**, query wall-clock 85s → 13–16s, all three models
+resident simultaneously, no evictions.
+
+## Trap 14: reranker VRAM is dominated by batch/context buffers, not the model — but never trim below your real chunk length
+
+Verified 2026-09-09. Trap 2b tells you to launch with
+`--batch-size 4096 --ubatch-size 4096`. That is correct, but know what it costs,
+because on a shared 8GB card it is the difference between everything fitting and
+nothing fitting:
+
+| Launch flags (same 609MB Q8_0 model) | VRAM |
+|---|---|
+| `--ubatch-size 2048 -c 4096` | **~4,000 MiB** |
+| `--ubatch-size 1536 -c 2048` | **370 MiB** |
+
+A ~600MB model reserving 4GB is all compute buffers and KV cache. Scores were
+**byte-identical** across both configs, so trimming costs no quality — only
+capacity.
+
+**But there is a hard floor: `--ubatch-size` must exceed your largest real
+chunk's token count.** Trimming to 1536 reintroduced Trap 2b on exactly the
+chunks big enough to matter:
+
+```
+rerank HTTP 500: input (1540 tokens) is too large to process ... (current batch size: 1536)
+rerank HTTP 500: input (1625 tokens) is too large ...
+```
+
+Real gbrain chunks measured **1540–1625 tokens** — well above the
+few-hundred-token figure a synthetic test suggests. `--ubatch-size 4096` with
+`-c 4096` cleared it and still left headroom alongside a pinned embedder and
+expansion model.
+
+**Budget the whole GPU, not one process.** Three things want the card and all
+three must be pinned or they will fight: the embedder (Trap 12), the expansion
+LLM (Trap 13), and the reranker's buffers (this trap). A working 8GB split:
+
+```
+qwen3-embedding:0.6b   ctx 8192          2.9 GB
+llama3.2-1b-4k         ctx 4096          1.5 GB
+reranker 0.6B Q8_0     ubatch/-c 4096   ~1.3 GB
+                                        -------
+                                        ~5.7 GB of 8 GB, ~2.3 GB headroom
+```
+
+## Trap 15: two gbrain config surfaces that report success and do nothing
+
+Both verified 2026-09-09; both cost real time because the tool prints "Set ...".
+
+1. **`gbrain config set <key>` can be silently shadowed by the file plane.**
+   `gbrain config set expansion_model ...` printed `Set expansion_model = ...`,
+   but `config get` still returned the OLD value with the note
+   `source: file/env plane (... or env) — a DB-plane value also exists and is
+   shadowed at runtime`. `set` writes the DB plane; the on-disk gbrain config
+   file wins. **Always `config get` after `config set`** and read the `source:`
+   line. To change a file-plane key you must edit that config file — it holds
+   API keys, so back it up, edit the single key, and never dump it to a
+   transcript.
+
+2. **`search.expansion=false` does not suppress expansion; only `--no-expand`
+   does.** The config resolves and displays correctly
+   (`expansion = false [config: search.expansion]`) but the `/v1/responses`
+   expansion call still fires. Measured: config-off = embed failure on 5/5 runs
+   and the reranker never fired; flag-off = 0/3 failures and the reranker fired
+   every time. Use the flag; do not trust the knob.
+
+## Measured payoff — is the local reranker actually worth it?
+
+Verified 2026-09-09 on a real 7,600-page brain (58,676 chunks). 20 qrels built
+mechanically (a distinctive sentence lifted from each of 20 sampled chunks;
+ground truth = the page it came from), `gbrain eval --qrels ... --k 5`, same
+queries both arms, reranker toggled between runs:
+
+| Metric | Reranker OFF | Reranker ON | Δ |
+|---|---|---|---|
+| P@5 | 0.16 | 0.18 | +0.02 |
+| R@5 | 0.80 | 0.90 | +0.10 |
+| **MRR** | 0.49 | **0.82** | **+0.33 (+67%)** |
+| **nDCG@5** | 0.56 | **0.84** | **+0.28 (+50%)** |
+
+MRR 0.49 → 0.82 means the correct page moves from about rank 2 to about rank
+1.2. R@5 rising is consistent, not suspect: reranking cannot change the
+candidate pool, but it pulls relevant docs *into* the top 5, which is what R@5
+measures.
+
+**Limits, stated honestly:** n=20, single run, no repeats, and queries lifted
+verbatim from chunks favour lexical matching — so treat the direction and
+magnitude as solid, the absolute values as optimistic. Both arms saw identical
+queries, so the comparison itself is fair.
+
+This independently confirms the pack's headline claim (gbrain's own docs cite a
+60% top-1 reshuffle). Run it on your own brain before and after — it is the only
+way to know the reranker is earning its GPU.
