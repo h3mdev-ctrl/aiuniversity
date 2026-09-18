@@ -1,12 +1,12 @@
 # agent-honesty
 
-Four guardrails against the failure mode a weak or hurried model falls into most:
+Six guardrails against the failure mode a weak or hurried model falls into most:
 **reporting confidently instead of truthfully.** It installs the rules as an
 always-loaded doc wired into your constitution, and gives the one guardrail with a
 mechanical surface -- `no-phantom-done` -- a deterministic, model-free linter that
 proves an unevidenced completion claim is catchable.
 
-The four guardrails:
+The six guardrails:
 
 - **no-phantom-done** -- never claim a side-effect (done / committed / pushed /
   logged / saved / deployed) or a verification result ("all tests pass") unless the
@@ -18,10 +18,18 @@ The four guardrails:
 - **no-vague-time-claims** -- check the clock before naming a time of day or date;
   don't infer "tonight"/"this morning" from message order or how a long
   conversation feels.
+- **verify-mechanism-before-acting** -- before a live system takes a new or bigger
+  real-world action, check that exact path has actually run successfully under
+  comparable conditions; a plausible, sourced mechanism (docs, a vendor forum) is
+  not the same as a proven one.
+- **verify-effect-not-acknowledgment** -- a write returning success (200 OK, no
+  exception) is not proof the intended effect happened; confirm with an
+  independent read, and when it doesn't match, diff the full payload shape, not
+  just the field you meant to change.
 
 ## Contract
 
-- Installs `~/.claude/agent_honesty.md` carrying all three guardrails, each with its
+- Installs `~/.claude/agent_honesty.md` carrying all six guardrails, each with its
   trigger, rule, **Why**, and **How to apply**.
 - Wires a pointer block into `~/.claude/CLAUDE.md` (marker-wrapped, idempotent) so
   the guardrails load every session and coexist with your existing constitution.
@@ -61,10 +69,11 @@ The four guardrails:
   re-implement them.
 - ❌ Claiming this pack *guarantees* honesty. It's a lint plus always-loaded rules --
   it forces the model to pair a claim with evidence; it cannot read the model's mind.
-- ❌ Letting `research-before-asserting` / `judge-to-spec` / `no-vague-time-claims`
-  masquerade as code-enforced. They have no clean mechanical surface and stay soft
-  rules by design; pretending otherwise is exactly the kind of false confidence the
-  pack warns against.
+- ❌ Letting `research-before-asserting` / `judge-to-spec` / `no-vague-time-claims` /
+  `verify-mechanism-before-acting` / `verify-effect-not-acknowledgment` masquerade
+  as code-enforced. They have no clean mechanical surface and stay soft rules by
+  design; pretending otherwise is exactly the kind of false confidence the pack
+  warns against.
 
 ## Related packs
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup_agent_honesty.py -- install the four agent-honesty guardrails as an
+setup_agent_honesty.py -- install the six agent-honesty guardrails as an
 always-loaded rules doc, wire a pointer into the constitution, and prove the
 deterministic phantom-claim linter fires.
 
@@ -18,12 +18,14 @@ import sys
 
 DOC_NAME = "agent_honesty.md"
 
-# The four guardrail headers that MUST be present for the doc to count as installed.
+# The six guardrail headers that MUST be present for the doc to count as installed.
 GUARDRAIL_MARKERS = (
     "## 1. no-phantom-done",
     "## 2. research-before-asserting",
     "## 3. judge-to-spec",
     "## 4. no-vague-time-claims",
+    "## 5. verify-mechanism-before-acting",
+    "## 6. verify-effect-not-acknowledgment",
 )
 
 POINTER_START = "<!-- agent-honesty-pointer:start -->"
@@ -31,15 +33,20 @@ POINTER_END = "<!-- agent-honesty-pointer:end -->"
 POINTER_BLOCK = f"""{POINTER_START}
 ## Agent honesty (always applies)
 
-Four honesty guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
+Six honesty guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
 **no-phantom-done** (never claim done without a receipt -- the tool call ran this
 turn and you show it), **research-before-asserting** (check the source before
 stating a load-bearing fact/constraint, don't complete a pattern from memory),
 **judge-to-spec** (grade an output against the real spec, not a remembered copy),
-and **no-vague-time-claims** (check the clock before naming a time of day or date --
-don't infer it from message order or conversation feel). Read that file; when a
-completion claim, a load-bearing assertion, a pass/fail judgment, or a date/time
-claim is in play, follow it.
+**no-vague-time-claims** (check the clock before naming a time of day or date --
+don't infer it from message order or conversation feel), **verify-mechanism-before-acting**
+(before a live system takes a new/bigger real-world action, check that exact path
+has actually run successfully before, don't trust a plausible sourced mechanism
+alone), and **verify-effect-not-acknowledgment** (a write returning success is not
+proof the effect happened -- confirm with an independent read, and diff the full
+payload shape when it doesn't match). Read that file; when a completion claim, a
+load-bearing assertion, a pass/fail judgment, a date/time claim, or an automated
+real-world action is in play, follow it.
 {POINTER_END}
 """
 

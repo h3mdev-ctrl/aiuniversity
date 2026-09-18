@@ -1,0 +1,66 @@
+# empirical-rigor -- three guardrails against trusting a convenient assumption
+# over real data or the real runtime environment.
+#
+# Sibling to agent-honesty, but a different failure family: not a false claim,
+# a design built on an assumption never checked against reality. Three rules,
+# each naming the moment it fires:
+#   1. distribution-before-statistic  -- check the real data shape before a mean
+#   2. environment-parity-for-adhoc-runs -- mirror production's real env, don't trim it
+#   3. continuity-is-not-uptime -- a gap-free dataset isn't proof a job ran correctly
+#
+# None of the three has a clean mechanical surface (each is a judgment call about
+# a design decision, not a lintable claim in text), so this pack ships the same
+# soft shape as agent-honesty's non-mechanical guardrails: an always-loaded doc +
+# an idempotent CLAUDE.md pointer, no linter, no enforcement hook.
+#
+# Surfaced from a live-automation session (thread verification-rigor) alongside
+# agent-honesty's guardrails 5-6 -- same root cause (trusting a plausible story
+# over a real check), applied to data/environment assumptions rather than to
+# claims or automated actions. Commands run from the repo root.
+name: empirical-rigor
+version: 0.1.0
+steps:
+  - id: rules-installed
+    instruction: >
+      Install the three empirical-rigor guardrails as an always-loaded rules doc
+      at ~/.claude/empirical_rigor.md. Each guardrail names the moment it fires,
+      the rule, why it matters, and what to do instead: distribution-before-statistic
+      (look at the real shape of historical data before picking a mean -- a spiky
+      or bimodal distribution needs a max or percentile instead),
+      environment-parity-for-adhoc-runs (a diagnostic invocation of production code
+      must mirror its real mounts/env/config exactly, not a trimmed copy),
+      continuity-is-not-uptime (a gap-free dataset is not proof a job has been
+      running correctly -- check deploy history before citing "N days, zero gaps"
+      as reliability).
+    check:
+      type: command_succeeds
+      cmd: python packs/empirical-rigor/files/setup_empirical_rigor.py --check-doc
+    fix: python packs/empirical-rigor/files/setup_empirical_rigor.py --install
+    on_fail: >
+      The rules doc is missing or incomplete. Install it (idempotent):
+      python packs/empirical-rigor/files/setup_empirical_rigor.py --install
+
+  - id: wired-into-constitution
+    instruction: >
+      Wire a pointer block into your global CLAUDE.md so the guardrails load every
+      session (idempotent; coexists with your existing constitution and with
+      agent-honesty's own pointer block).
+    check:
+      type: command_succeeds
+      cmd: python packs/empirical-rigor/files/setup_empirical_rigor.py --check-wired
+    fix: python packs/empirical-rigor/files/setup_empirical_rigor.py --install
+    on_fail: >
+      The CLAUDE.md pointer is missing. Wire it in (safe, marker-wrapped):
+      python packs/empirical-rigor/files/setup_empirical_rigor.py --install
+
+  - id: soft-by-design-note
+    instruction: >
+      All three guardrails stay soft by design -- none has a clean mechanical
+      surface the way no-phantom-done's completion claims do (there's no evidence
+      token to lint for "did you actually check the distribution/environment/deploy
+      history"). Naming the trigger in the always-loaded doc is the lever, same as
+      agent-honesty's research-before-asserting and judge-to-spec.
+      This step is informational and always passes.
+    check:
+      type: command_succeeds
+      cmd: python -c "exit(0)"
