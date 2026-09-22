@@ -1,0 +1,52 @@
+# recall-discipline -- three guardrails against re-deriving knowledge that
+# already exists reachable somewhere: check memory before researching outward,
+# consolidate fragmented topic files instead of letting them accumulate, and
+# treat "this is a project" as a request to build its durable home immediately.
+#
+# All three guardrails are soft by design -- none has a clean mechanical
+# surface, same as agent-honesty's research-before-asserting/judge-to-spec/
+# no-vague-time-claims. Installed as an always-loaded doc + constitution
+# pointer, same shape as agent-honesty.
+#
+# Requested via Nexus. Commands run from the repo root.
+name: recall-discipline
+version: 0.1.0
+steps:
+  - id: rules-installed
+    instruction: >
+      Install the three recall-discipline guardrails as an always-loaded rules
+      doc at ~/.claude/recall_discipline.md. Each names the moment it fires:
+      recon-before-research (check existing memory for a system before
+      researching it externally), consolidate-dont-accumulate (3+ memory files
+      on one topic is the trigger to fold them into a canonical reference),
+      project-framing-is-a-signal (naming something "a project" means building
+      its durable home now, not after the work has already scattered).
+    check:
+      type: command_succeeds
+      cmd: python packs/recall-discipline/files/setup_recall_discipline.py --check-doc
+    fix: python packs/recall-discipline/files/setup_recall_discipline.py --install
+    on_fail: >
+      The rules doc is missing or incomplete. Install it (idempotent):
+      python packs/recall-discipline/files/setup_recall_discipline.py --install
+
+  - id: wired-into-constitution
+    instruction: >
+      Wire a pointer block into your global CLAUDE.md so the guardrails load
+      every session (idempotent; coexists with your existing constitution).
+    check:
+      type: command_succeeds
+      cmd: python packs/recall-discipline/files/setup_recall_discipline.py --check-wired
+    fix: python packs/recall-discipline/files/setup_recall_discipline.py --install
+    on_fail: >
+      The CLAUDE.md pointer is missing. Wire it in (safe, marker-wrapped):
+      python packs/recall-discipline/files/setup_recall_discipline.py --install
+
+  - id: enforcement-note
+    instruction: >
+      All three guardrails are soft by design -- no clean mechanical surface
+      exists for "did you check memory first" or "should this be a project."
+      Naming the trigger in always-loaded context is the lever, not a hook.
+      This step is informational and always passes.
+    check:
+      type: command_succeeds
+      cmd: python -c "exit(0)"
