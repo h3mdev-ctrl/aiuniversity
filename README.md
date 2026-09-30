@@ -235,7 +235,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 339 tests, all green
+python -m pytest tests/ -q      # 352 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -343,7 +343,7 @@ aiuniversity/
     gbrain-local-reranker/ a free local reranker in place of the hosted one
     windows-shell/         Windows shell footguns (UTF-8/SSL, PS 5.1, scheduled-task env)
     obsidian-wiki/         a free-publishable LLM wiki, linked into memory
-  tests/                   339 tests
+  tests/                   352 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -364,7 +364,7 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 339 tests green.
+teach/verify/remediate skill — 352 tests green.
 
 Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
