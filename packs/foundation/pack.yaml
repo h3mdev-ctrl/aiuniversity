@@ -65,12 +65,17 @@ steps:
 
       Skip this if you are not using gbrain. It is not required for the foundation
       to function.
+    # Passes when gbrain is absent (it is optional) or present AND runnable;
+    # FAILS when it is on PATH but broken. The old check exited 0 on both
+    # branches of which('gbrain'), so it could never fail.
     check:
       type: command_succeeds
-      cmd: python -c "import shutil; exit(0 if shutil.which('gbrain') else 0)"
+      cmd: python packs/foundation/files/capabilities_check.py
     on_fail: >
-      gbrain is not on your PATH. That is fine -- foundation is complete without it.
-      When you are ready, run: python -m runner.cli remediate packs/gbrain-windows
+      gbrain is on your PATH but `gbrain --version` fails -- a half-installed
+      brain. (Not having gbrain at all passes; it is optional.) Repair it with:
+      python -m runner.cli remediate packs/gbrain-windows -- or remove it from
+      PATH if you do not intend to use it.
 
   - id: layer-5-durability
     instruction: >

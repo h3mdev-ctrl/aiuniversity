@@ -15,7 +15,7 @@
 #
 # Commands run from the repo root (where packs/ lives).
 name: memory-socket
-version: 0.1.0
+version: 0.2.0
 steps:
   - id: store-present
     instruction: >
@@ -54,8 +54,10 @@ steps:
       Nothing is registered on UserPromptSubmit. Copy
       packs/memory-socket/files/examples/recall_on_prompt.py into your hooks
       folder and register it on UserPromptSubmit in ~/.claude/settings.json.
-      Read the file first -- the two comment blocks (the absolute relevance floor,
-      and per-project store resolution) are the parts people get wrong.
+      Read the file first -- the absolute gates + MIN_INJECT confidence floor,
+      per-project store resolution, and the one-slot-each semantic merge are
+      the parts people get wrong. The semantic slot is OPTIONAL: it stays off
+      until you build an index with files/examples/build_recall_index.py.
 
   - id: recall-live
     instruction: >
@@ -63,12 +65,27 @@ steps:
       script was deleted or whose store does not resolve is registered and
       silent, and passes every presence audit. This EXECUTES it with a real
       prompt and demands output. Run it from a project that HAS memory.
+      .
+      It also runs the hook with RECALL_TRACE=1 and reads one trace line per
+      branch that executed. A configured branch that reports SKIPPED, or never
+      reports at all, is DEGRADED -- not LIVE -- even though the hook still
+      printed memories. That is the failure that hid for three weeks: the
+      semantic branch raised NameError into `except: pass` on every prompt
+      while lexical kept emitting, so every output-only check said healthy.
+      Finally a negative control: the trivial prompt "ok" must inject nothing.
     check:
-      type: contains
+      type: regex
       cmd: python packs/memory-socket/files/socket_doctor.py --probe recall
-      expect: "LIVE"
+      expect: "(?m)^LIVE "
     on_fail: >
-      The hook is registered but emitted nothing. Two causes, in order of
+      DEGRADED: read the trace lines the doctor prints. `semantic SKIPPED:
+      <ExceptionType>` names the swallowed exception -- a timeout or
+      connection error usually means the embed server is down or cold (the
+      hook spawns a detached warm-up; re-probe in ~10s), JSONDecodeError means
+      a truncated index (rebuild it). "negative control failed" means the hook
+      injects on everything: it has no absolute floor.
+      .
+      DARK: the hook is registered but emitted nothing. Two causes, in order of
       likelihood: (1) you are running from a directory with no memory/ folder --
       cd into a project that has one and re-probe; (2) the hook genuinely fails.
       Run it by hand to see:
@@ -89,7 +106,10 @@ steps:
       packs/memory-socket/files/examples/identity_on_start.py into your hooks
       folder and register it on SessionStart. It expects a capped
       user_representation.md in your memory folder; if you do not have one yet,
-      the hook stays silent by design rather than breaking startup.
+      the hook stays silent by design rather than breaking startup. If the file
+      is older than STALE_DAYS (3) the hook withholds it and prints one
+      SUPPRESSED line instead -- your refresh job has stopped; fix that, not the
+      hook. `socket_doctor.py --probe identity` reports that state as DEGRADED.
 
   - id: salvage-wired
     instruction: >
@@ -159,8 +179,15 @@ steps:
       a loop.
     check:
       type: command_succeeds
-      cmd: python packs/memory-socket/files/socket_doctor.py --socket salvage
+      cmd: python packs/memory-socket/files/socket_doctor.py --probe learn
     on_fail: >
+      NO VOTE means: whatever is registered on PreCompact ran against a
+      throwaway store in which one helpful vote was planted (a memory fired on
+      a real user prompt and the reply cited its identifier), and no trust
+      value moved. Either nothing on PreCompact votes, or your voter reads a
+      different store layout than files/examples/learn_on_compact.py (it
+      honours CLAUDE_MEMORY_HOME and writes <memory>/.recall/trust.json).
+      .
       This step is a READING step as much as a check: open
       files/examples/learn_on_compact.py and read the four ways an inferred
       vote signal lies (benchmark contamination, common-word evidence,

@@ -37,7 +37,13 @@ import time
 MAX_ITEMS = 12
 MAX_CHARS = 5000
 MAX_LINES_PER_MSG = 400     # see LATENCY below
-CARRY_DIR = pathlib.Path.home() / ".claude" / "state" / "compact_carry"
+# Honour CLAUDE_HOME like every other script in this pack. Hard-coding
+# Path.home() meant socket_doctor's `--probe learn` (which runs every PreCompact
+# hook inside a temp CLAUDE_HOME) wrote a carry file into the user's REAL home.
+# restore_post_compact.py must resolve the same directory.
+import os as _os
+CARRY_DIR = (pathlib.Path(_os.environ.get("CLAUDE_HOME") or (pathlib.Path.home() / ".claude"))
+             / "state" / "compact_carry")
 
 # What is worth keeping: a number, or a verdict.
 KEEP_RE = re.compile(

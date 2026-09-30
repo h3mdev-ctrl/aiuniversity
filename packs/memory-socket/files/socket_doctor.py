@@ -10,20 +10,33 @@ importantly -- whether what IS plugged in still WORKS.
 The distinction that matters:
   REGISTERED  a hook command is listed in settings.json          (cheap, weak)
   LIVE        that command runs and produces output on a probe   (real proof)
+  DEGRADED    it produces output, but a branch it is configured to run did not
+              (a fail-open `except: pass` ate it) or it spoke when it should not
 
 A registered-but-silent hook is the worst state: it looks installed on every
-audit and does nothing. This tool separates the two on purpose.
+audit and does nothing. A DEGRADED one is the second worst, because its output
+looks exactly like a healthy hook's. We ran three stacked silent failures in a
+recall hook for weeks while every check said HEALTHY -- hence the trace protocol.
 
 USAGE
   python socket_doctor.py --list                 human table of all sockets
   python socket_doctor.py --check                exit 0 iff every REQUIRED socket is wired
   python socket_doctor.py --socket recall        check exactly one socket
-  python socket_doctor.py --probe recall         EXECUTE it and prove it emits
+  python socket_doctor.py --probe recall         EXECUTE it: per-branch trace + negative control
+  python socket_doctor.py --probe learn          prove the PreCompact voter actually VOTES
   python socket_doctor.py --json                 machine-readable
 
+TRACE PROTOCOL (recall): the probe runs the hook with RECALL_TRACE=1. A hook that
+supports it prints to STDERR `trace: branches=lexical,semantic` (what it is
+configured to run) and one line per branch that EXECUTED -- `trace: lexical ran,
+1 hit`, `trace: semantic ran, top=0.69 gap=0.12`, or `trace: semantic SKIPPED:
+ConnectionRefusedError`. Any SKIPPED/FAILED line, or a configured branch with no
+`ran` line, is DEGRADED. A hook that prints no trace lines is judged on output
+alone and labelled untraced.
+
 EXIT CODES
-  0  asked-for sockets are wired (and, for --probe, live)
-  1  a required socket is dark
+  0  asked-for sockets are wired (and, for --probe, live / voting)
+  1  a required socket is dark, or the probe is DARK / DEGRADED / NO VOTE
   2  settings.json missing or unreadable
 """
 from __future__ import annotations
@@ -32,8 +45,11 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
+import tempfile
+import time
 
 # --------------------------------------------------------------------------
 # The socket table. This IS the teaching content: the lifecycle points a memory
@@ -102,7 +118,14 @@ SOCKETS = {
     },
 }
 
+# Not a socket of its own (it rides PreCompact), but it has its own probe,
+# because "a PreCompact hook is registered" says nothing about whether anything
+# ever VOTES -- that check passed for months over a loop with zero votes.
+EXTRA_PROBES = ("learn",)
+
 PROBE_TIMEOUT_S = 20
+NEGATIVE_PROMPT = "ok"          # carries no signal: a recall hook must stay silent
+TRACE_RE = re.compile(r"^trace:\s*(.*)$")
 
 
 def claude_home() -> pathlib.Path:
@@ -138,7 +161,7 @@ def audit(settings: dict) -> dict:
     }
 
 
-def _probe_payload(name: str) -> str:
+def _probe_payload(name: str, **override) -> str:
     """Build the probe's stdin, reproducing the REAL invocation conditions.
 
     THE LESSON THIS ENCODES: a probe that does not match how the harness really
@@ -150,11 +173,49 @@ def _probe_payload(name: str) -> str:
     """
     payload = dict(SOCKETS[name].get("probe_stdin") or {})
     payload.setdefault("cwd", os.getcwd())
+    payload.update(override)
     return json.dumps(payload)
 
 
-def probe(name: str, settings: dict) -> tuple[bool, str]:
+def _run(cmd: str, payload: str, env: dict | None = None):
+    """-> (proc, None) or (None, failure text). Never raises."""
+    try:
+        return subprocess.run(cmd, shell=True, input=payload, capture_output=True,
+                              encoding="utf-8", errors="replace",
+                              timeout=PROBE_TIMEOUT_S, env=env), None
+    except subprocess.TimeoutExpired:
+        return None, f"timeout after {PROBE_TIMEOUT_S}s: {cmd[:60]}"
+    except OSError as e:
+        return None, f"could not run: {e!r}"
+
+
+def traces(stderr: str) -> list[str]:
+    return [m.group(1).strip() for line in (stderr or "").splitlines()
+            if (m := TRACE_RE.match(line.strip()))]
+
+
+def branch_problems(lines: list[str]) -> list[str]:
+    """Judge one hook's trace. Empty list = every configured branch ran."""
+    configured: set[str] = set()
+    ran: set[str] = set()
+    problems = []
+    for t in lines:
+        if t.startswith("branches="):
+            configured |= {b.strip() for b in t[len("branches="):].split(",") if b.strip()}
+        elif m := re.match(r"(\w+) ran\b", t):
+            ran.add(m.group(1))
+        if "SKIPPED" in t or "FAILED" in t:
+            problems.append(t)
+    for b in sorted(configured - ran):
+        problems.append(f"{b} is configured but never reported running "
+                        f"(an exception swallowed before its trace line?)")
+    return problems
+
+
+def probe(name: str, settings: dict) -> tuple[str, str, list[str]]:
     """Actually EXECUTE the socket's hook and prove it emits something.
+
+    -> (state, detail, trace_lines) with state LIVE / DEGRADED / DARK.
 
     This is the difference between an audit that says "installed" and one that
     says "working". A hook whose script was deleted, whose interpreter path went
@@ -164,20 +225,16 @@ def probe(name: str, settings: dict) -> tuple[bool, str]:
     meta = SOCKETS[name]
     cmds = commands_for(settings, meta["event"])
     if not cmds:
-        return False, f"nothing registered on {meta['event']}"
+        return "DARK", f"nothing registered on {meta['event']}", []
 
+    env = dict(os.environ, RECALL_TRACE="1")
     payload = _probe_payload(name)
-    emitted, failures = [], []
+    emitted, failures, degraded, shown = [], [], [], []
+    traced = False
     for cmd in cmds:
-        try:
-            proc = subprocess.run(cmd, shell=True, input=payload,
-                                  capture_output=True, encoding="utf-8",
-                                  errors="replace", timeout=PROBE_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            failures.append(f"timeout after {PROBE_TIMEOUT_S}s: {cmd[:60]}")
-            continue
-        except OSError as e:
-            failures.append(f"could not run: {e!r}")
+        proc, err = _run(cmd, payload, env)
+        if err:
+            failures.append(err)
             continue
         # A hook that exits non-zero is broken regardless of output: on most
         # events a non-zero exit is either ignored (wasted) or BLOCKING (worse).
@@ -185,21 +242,120 @@ def probe(name: str, settings: dict) -> tuple[bool, str]:
             failures.append(f"exit {proc.returncode}: "
                             f"{(proc.stderr or '').strip()[:120]}")
             continue
-        if (proc.stdout or "").strip():
+        lines = traces(proc.stderr)
+        traced = traced or bool(lines)
+        shown += lines
+        degraded += branch_problems(lines)
+        out = (proc.stdout or "").strip()
+        if out:
             emitted.append(cmd)
+        # identity: a stale user model is suppressed with a one-line notice.
+        # That notice is output, but it is the alarm, not health.
+        if "SUPPRESSED" in out:
+            degraded.append(out.splitlines()[0][:160])
 
+    # NEGATIVE CONTROL (recall only). A positive probe alone cannot tell a
+    # discriminating hook from one that injects on everything.
+    if name == "recall" and emitted:
+        for cmd in cmds:
+            proc, err = _run(cmd, _probe_payload(name, prompt=NEGATIVE_PROMPT), env)
+            if proc is not None and proc.returncode == 0 and (proc.stdout or "").strip():
+                degraded.append(f"negative control failed: injected on the trivial "
+                                f"prompt {NEGATIVE_PROMPT!r} ({cmd[:50]})")
+
+    if degraded:
+        return "DEGRADED", "; ".join(degraded[:3]), shown
     if emitted:
-        return True, f"{len(emitted)}/{len(cmds)} registered hook(s) emitted output"
+        note = "" if traced or name != "recall" else (
+            " (untraced: the hook prints no RECALL_TRACE lines, so a swallowed "
+            "branch cannot be ruled out)")
+        return "LIVE", (f"{len(emitted)}/{len(cmds)} registered hook(s) emitted "
+                        f"output{note}"), shown
     if failures:
-        return False, "; ".join(failures[:2])
+        return "DARK", "; ".join(failures[:2]), shown
     # Ran clean but said nothing. For a memory socket that is a real failure --
     # silence means the store is empty, the path is wrong, or an exception was
     # swallowed. It is NOT proof of health.
-    return False, (f"{len(cmds)} hook(s) ran and exited 0 but emitted NOTHING. "
-                   f"Either a silent hook (looks installed, does nothing) OR the "
-                   f"probe ran somewhere the store does not resolve -- cwd was "
-                   f"{os.getcwd()}. Re-probe from a project that HAS memory "
-                   f"before concluding the hook is broken.")
+    return "DARK", (f"{len(cmds)} hook(s) ran and exited 0 but emitted NOTHING. "
+                    f"Either a silent hook (looks installed, does nothing) OR the "
+                    f"probe ran somewhere the store does not resolve -- cwd was "
+                    f"{os.getcwd()}. Re-probe from a project that HAS memory "
+                    f"before concluding the hook is broken."), shown
+
+
+# ---- the learning-loop probe ------------------------------------------------
+CANARY = "reference_probe_canary.md"
+CANARY_ID = "probe_canary_4417"
+CANARY_PROMPT = "probe: how does probe_canary_4417 work"
+
+
+def _seed_learn_fixture(root: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """A throwaway store in which exactly ONE vote is owed: a memory fired on a
+    real user prompt and the reply cited its identifier. Any working voter moves
+    its trust. Returns (memory_dir, transcript)."""
+    mem = root / "memory"
+    (mem / ".recall").mkdir(parents=True)
+    (mem / "MEMORY.md").write_text(f"| probe | [{CANARY}]({CANARY}) |\n", encoding="utf-8")
+    (mem / CANARY).write_text(
+        f"---\nname: probe-canary\ndescription: when you touch {CANARY_ID}, read this\n"
+        f"type: reference\n---\nSynthetic memory written by socket_doctor --probe learn.\n",
+        encoding="utf-8")
+    (mem / ".recall" / "trust.json").write_text(json.dumps({CANARY: 0.5}), encoding="utf-8")
+    (mem / ".recall" / "fires.jsonl").write_text(json.dumps({
+        "ts": time.time(), "session_id": "probe-learn", "prompt": CANARY_PROMPT,
+        "hits": [{"target": CANARY, "via": "lexical"}]}) + "\n", encoding="utf-8")
+    transcript = root / "transcript.jsonl"
+    transcript.write_text("\n".join(json.dumps(o) for o in (
+        {"type": "user", "message": {"role": "user", "content": CANARY_PROMPT}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": f"Per the memory, {CANARY_ID} is configured by ..."}]}},
+    )) + "\n", encoding="utf-8")
+    return mem, transcript
+
+
+def probe_learn(settings: dict) -> tuple[str, str]:
+    """Run every PreCompact hook against a synthetic store and demand a VOTE.
+
+    Registration of a PreCompact hook proves nothing about learning -- that is
+    the check this replaced, and it passed over a loop with zero votes. Here the
+    evidence for one helpful vote is planted; a voter that runs and moves nothing
+    FAILS. The fixture lives in a temp dir (CLAUDE_MEMORY_HOME and CLAUDE_HOME
+    point there), so a hook that honours them never touches your real store.
+    """
+    cmds = commands_for(settings, "PreCompact")
+    if not cmds:
+        return "NO VOTE", "nothing registered on PreCompact, so nothing can vote"
+    with tempfile.TemporaryDirectory(prefix="socket_learn_") as td:
+        root = pathlib.Path(td)
+        mem, transcript = _seed_learn_fixture(root)
+        (root / "home").mkdir()
+        (root / "userhome").mkdir()
+        # The probe runs the USER'S OWN PreCompact hooks, which may ignore
+        # CLAUDE_HOME and write via Path.home() (measured: one did, leaving a
+        # 'probe-learn' carry file in the real ~/.claude). Point HOME and
+        # USERPROFILE at the temp dir too, so a hard-coded home lands here.
+        env = dict(os.environ, CLAUDE_MEMORY_HOME=str(mem),
+                   CLAUDE_HOME=str(root / "home"), RECALL_TRACE="1",
+                   HOME=str(root / "userhome"), USERPROFILE=str(root / "userhome"))
+        payload = json.dumps({"session_id": "probe-learn", "trigger": "manual",
+                              "transcript_path": str(transcript), "cwd": str(root),
+                              "hook_event_name": "PreCompact"})
+        notes = []
+        for cmd in cmds:
+            proc, err = _run(cmd, payload, env)
+            notes += [err] if err else traces(proc.stderr)
+        try:
+            after = json.loads((mem / ".recall" / "trust.json").read_text(encoding="utf-8"))
+            new = float(after.get(CANARY, 0.5))
+        except (OSError, ValueError) as e:
+            return "NO VOTE", f"trust store unreadable after the run: {type(e).__name__}"
+    if abs(new - 0.5) > 1e-9:
+        return "VOTED", (f"trust on the planted helpful firing moved 0.50 -> {new:.2f} "
+                         f"({len(cmds)} PreCompact hook(s) ran)")
+    return "NO VOTE", (f"{len(cmds)} PreCompact hook(s) ran and no trust value moved, "
+                       f"though one helpful vote was owed. The loop is decoration. "
+                       + ("Trace: " + "; ".join(notes[:3]) if notes else
+                          "No hook printed a learn trace line."))
 
 
 def main() -> int:
@@ -211,10 +367,12 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
-    for n in (a.socket, a.probe):
-        if n and n not in SOCKETS:
-            print(f"unknown socket {n!r}; known: {', '.join(SOCKETS)}")
-            return 2
+    if a.socket and a.socket not in SOCKETS:
+        print(f"unknown socket {a.socket!r}; known: {', '.join(SOCKETS)}")
+        return 2
+    if a.probe and a.probe not in (*SOCKETS, *EXTRA_PROBES):
+        print(f"unknown probe {a.probe!r}; known: {', '.join((*SOCKETS, *EXTRA_PROBES))}")
+        return 2
 
     settings = load_settings()
     if settings is None:
@@ -230,11 +388,17 @@ def main() -> int:
                           for k, v in state.items()}, indent=2))
         return 0
 
+    if a.probe == "learn":
+        verdict, detail = probe_learn(settings)
+        print(f"{verdict}  learn (PreCompact): {detail}")
+        return 0 if verdict == "VOTED" else 1
+
     if a.probe:
-        ok, detail = probe(a.probe, settings)
-        print(f"{'LIVE' if ok else 'DARK'}  {a.probe} "
-              f"({SOCKETS[a.probe]['event']}): {detail}")
-        return 0 if ok else 1
+        verdict, detail, lines = probe(a.probe, settings)
+        print(f"{verdict}  {a.probe} ({SOCKETS[a.probe]['event']}): {detail}")
+        for t in lines:
+            print(f"    trace: {t}")
+        return 0 if verdict == "LIVE" else 1
 
     if a.socket:
         wired = bool(state[a.socket]["commands"])
@@ -263,13 +427,12 @@ def main() -> int:
     if not a.check:
         print("\nNote: 'wired' means REGISTERED, not proven. Run --probe <socket> "
               "to execute one and\nconfirm it actually emits -- a silent hook "
-              "passes every registration audit.")
+              "passes every registration audit.\n--probe learn proves the trust "
+              "loop votes; a registered PreCompact hook does not.")
     return 1 if (a.check and missing_required) else 0
 
 
 if __name__ == "__main__":
-    try:
+    if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     raise SystemExit(main())

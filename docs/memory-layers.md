@@ -14,15 +14,39 @@ production" (X, 2026-07-02). Captured in gbrain: `concepts/four-layer-agent-memo
 
 | Layer (time horizon) | What it is | Our pack(s) |
 |---|---|---|
-| **1. In-session context** | identity file + an always-loaded memory *index* pointing to per-fact files (name/description/type/body), read on demand | **identity** + **memory** (this is exactly `MEMORY.md` + `<type>_<topic>.md`) |
-| **2. Post-session retention** | end-of-session: curated facts (decisions, failure+fix, confirmed prefs) pushed to a store, then **fact → human/gate review → index entry** | **autolearn** (the drain: capture → deterministic gate → memory entry — the same "approval gate before permanent") |
+| **1. In-session context** | identity file + an always-loaded memory *index* pointing to per-fact files (name/description/type/body), read on demand | **identity** + **memory** (this is exactly `MEMORY.md` + `<type>_<topic>.md`) + **context** (SessionStart orientation, PostCompact re-read) + **memory-socket** (the *recall* socket that pulls the relevant files into each prompt, and the *identity* socket) |
+| **2. Post-session retention** | end-of-session: curated facts (decisions, failure+fix, confirmed prefs) pushed to a store, then **fact → human/gate review → index entry** | **autolearn** (the drain: capture → deterministic gate → memory entry — the same "approval gate before permanent") + **wrap-up** (the close-out that runs it) + **episodes** (the failure+fix *instance*, recalled on identifiers; the generalised lesson still goes to memory) + **memory-socket** (salvage before compaction, trust votes after) |
 | **3. Shared long-term state** | a shared, append-only **live-context log** + decisions log both/every agent reads before replying and appends after each turn | **— not shipped —** (see below) |
 | **4. Searchable knowledge** | a compiled wiki / semantic search over everything written down; "recall", not "carry" | **gbrain-windows** (+ **obsidian-wiki** as the vault it indexes) |
 
 Three of the four are things these packs already set up and verify. The convergence is
 the validation; the gap is the lesson.
 
-## The gap: Layer 3 — a shared live-context log (planned `shared-context` module)
+## Cutting across all four: liveness (added 2026-09-30)
+
+The layers describe *where* memory lives. They say nothing about whether the
+machinery that moves it is **running**. On the author's own system, four parts
+failed silently at once, and every health check reported HEALTHY the whole time:
+
+| What failed | For how long | Why every check still passed |
+|---|---|---|
+| The recall hook's semantic branch | 3 weeks | a `NameError` inside a fail-open `try/except: pass`; the lexical branch kept printing, so "the hook produced output" stayed true |
+| …and behind it, the embed call | same | a 1.5s client timeout against a 3.1s cold model load; the disconnect aborted the load, so the model was never resident |
+| The nightly identity refresh | 1 month | a stale file kept being injected; nothing checked its age |
+| The post-session scanner (layer 2's producer) | 2 weeks | one duplicate row rolled back every batch; the backlog check counted an *empty queue* as "OK" |
+
+The generalisable rule: **a check must be able to tell the two states apart.**
+"Registered" is not "running"; "printed something" is not "every branch ran";
+"nothing pending" is not "the producer is alive". The memory-socket pack's
+branch-level probe, the episodes pack's trace, and "time since the producer last
+*committed*" are the concrete forms. If a check would pass on the broken system,
+it is decoration.
+
+## Layer 3 — a shared live-context log (planned `shared-context` module)
+
+*Status 2026-09-30:* running in production on the author's box as a signed,
+append-only activity log (one line per ship/decision, last 12 injected at
+SessionStart, rotated past 120 lines). Not yet packaged; the design below stands.
 
 Layer 3 is what makes memory work across **more than one agent/session at a time**. A
 single Claude doesn't need it; the moment you run several — a Telegram bridge, a cloud
