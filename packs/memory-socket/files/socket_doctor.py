@@ -24,6 +24,8 @@ USAGE
   python socket_doctor.py --socket recall        check exactly one socket
   python socket_doctor.py --probe recall         EXECUTE it: per-branch trace + negative control
   python socket_doctor.py --probe learn          prove the PreCompact voter actually VOTES
+  python socket_doctor.py --probe restore        salvage under session A, restore under B (the
+                                                 compaction re-key): LIVE / DEAD / LEAK
   python socket_doctor.py --json                 machine-readable
 
 TRACE PROTOCOL (recall): the probe runs the hook with RECALL_TRACE=1. A hook that
@@ -177,12 +179,12 @@ def _probe_payload(name: str, **override) -> str:
     return json.dumps(payload)
 
 
-def _run(cmd: str, payload: str, env: dict | None = None):
+def _run(cmd: str, payload: str, env: dict | None = None, cwd: str | None = None):
     """-> (proc, None) or (None, failure text). Never raises."""
     try:
         return subprocess.run(cmd, shell=True, input=payload, capture_output=True,
                               encoding="utf-8", errors="replace",
-                              timeout=PROBE_TIMEOUT_S, env=env), None
+                              timeout=PROBE_TIMEOUT_S, env=env, cwd=cwd), None
     except subprocess.TimeoutExpired:
         return None, f"timeout after {PROBE_TIMEOUT_S}s: {cmd[:60]}"
     except OSError as e:
@@ -281,6 +283,84 @@ def probe(name: str, settings: dict) -> tuple[str, str, list[str]]:
                     f"probe ran somewhere the store does not resolve -- cwd was "
                     f"{os.getcwd()}. Re-probe from a project that HAS memory "
                     f"before concluding the hook is broken."), shown
+
+
+# ---- the re-key probe (salvage -> compaction -> restore) --------------------
+REKEY_MARKER = "rekeycanary_7731"
+
+
+def probe_rekey(settings: dict) -> tuple[str, str]:
+    """Prove a salvaged carry survives the session-id change at compaction,
+    and does not leak into another directory.
+
+    -> (LIVE | DEAD | LEAK | DARK, detail)
+
+    Replaces the old `--probe restore`, which executed only the PostCompact hook
+    and reported LIVE on any output -- and the example restore hook ALWAYS
+    prints boilerplate ("CONTEXT COMPACTED ..."), so it passed with the carry
+    chain completely dead. Output is not evidence; the MARKER coming back is.
+
+    Real sequence reproduced, in an isolated home (CLAUDE_HOME, HOME and
+    USERPROFILE all point at a temp dir, so a hook that hard-codes
+    Path.home() still cannot touch the real one):
+      1. every PreCompact hook, session A, cwd = projA, transcript holds MARKER
+      2. every PostCompact hook, session B (the re-key), cwd = projA
+         -> MARKER must appear                          else DEAD
+      3. every PostCompact hook, session C, cwd = projB (another worktree)
+         -> MARKER must NOT appear                      else LEAK
+    """
+    pre = commands_for(settings, "PreCompact")
+    post = commands_for(settings, "PostCompact")
+    if not (pre and post):
+        missing = " and ".join(e for e, c in (("PreCompact", pre), ("PostCompact", post)) if not c)
+        return "DARK", f"nothing registered on {missing}; salvage and restore are one mechanism"
+    with tempfile.TemporaryDirectory(prefix="socket_rekey_") as td:
+        root = pathlib.Path(td)
+        proj_a, proj_b, home, uhome = (root / n for n in ("projA", "projB", "home", "userhome"))
+        for d in (proj_a, proj_b, home, uhome):
+            d.mkdir()
+        transcript = root / "transcript.jsonl"
+        transcript.write_text("\n".join(json.dumps(o) for o in (
+            {"type": "user", "message": {"role": "user", "content":
+                f"measure the {REKEY_MARKER} latency and keep the number"}},
+            {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": f"Measured {REKEY_MARKER} at 412 ms, verified on "
+                                         f"3 runs; the cold path is the root cause."}]}},
+        )) + "\n", encoding="utf-8")
+        env = dict(os.environ, CLAUDE_HOME=str(home), HOME=str(uhome), USERPROFILE=str(uhome))
+
+        for cmd in pre:
+            _run(cmd, json.dumps({"session_id": "probe-rekey-A", "trigger": "manual",
+                                  "transcript_path": str(transcript), "cwd": str(proj_a),
+                                  "hook_event_name": "PreCompact"}), env, cwd=str(proj_a))
+
+        def restored(session: str, cwd: pathlib.Path) -> bool:
+            for cmd in post:
+                proc, _ = _run(cmd, json.dumps({"session_id": session, "cwd": str(cwd),
+                                                "hook_event_name": "PostCompact"}),
+                               env, cwd=str(cwd))
+                if proc is not None and REKEY_MARKER in (proc.stdout or ""):
+                    return True
+            return False
+
+        survived = restored("probe-rekey-B", proj_a)
+        leaked = restored("probe-rekey-C", proj_b)
+
+    if leaked:
+        return "LEAK", ("a carry salvaged in one directory was restored into ANOTHER "
+                        "(session C, different cwd). The restore hook is falling back to "
+                        "a key that is not scoped to the working directory -- e.g. "
+                        "'newest carry file'. That prints someone else's findings as "
+                        "this session's facts. Scope the lookup to cwd.")
+    if not survived:
+        return "DEAD", ("salvaged under session A, restored under session B in the SAME "
+                        "directory, and the carry did not come back. Claude Code "
+                        "re-keys the session at compaction, so a lookup keyed only on "
+                        "session_id never hits. Key it on the working directory too "
+                        "(see files/examples/restore_post_compact.py).")
+    return "LIVE", (f"carry survived the session re-key (A -> B, same cwd) and did not "
+                    f"leak to another directory ({len(pre)} PreCompact, "
+                    f"{len(post)} PostCompact hook(s))")
 
 
 # ---- the learning-loop probe ------------------------------------------------
@@ -387,6 +467,14 @@ def main() -> int:
                               "n": len(v["commands"])}
                           for k, v in state.items()}, indent=2))
         return 0
+
+    if a.probe == "restore":
+        # A generic "did it print?" probe passes the example restore hook on
+        # boilerplate alone. Restore is only meaningful as the second half of
+        # salvage, across the re-key, so that is what gets probed.
+        verdict, detail = probe_rekey(settings)
+        print(f"{verdict}  restore (PreCompact -> PostCompact, re-keyed): {detail}")
+        return 0 if verdict == "LIVE" else 1
 
     if a.probe == "learn":
         verdict, detail = probe_learn(settings)

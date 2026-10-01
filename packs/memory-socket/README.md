@@ -223,6 +223,17 @@ and different per worktree — so it scopes the lookup without reintroducing the
 > back later, prove the round trip across the event it is meant to survive.
 > A test that writes and reads under the *same* id proves nothing.
 
+**v0.2.1: the examples now do this, and the probe checks it.** The salvage example
+writes the carry under both `<session_id>.md` and `cwd-<hash>.md`; restore tries the
+session key first, then the cwd key -- accepted only if written in the last 15
+minutes, since salvage runs seconds before restore and a wider window only buys
+the risk of picking up another session that compacted in the same directory.
+Until v0.2.1 the examples still keyed on `session_id` alone, and `--probe restore`
+passed anyway because the restore hook always prints boilerplate. The probe now
+runs the real round trip in an isolated home -- salvage as session A, restore as
+session B in the same directory (the carry must come back: **LIVE**, else **DEAD**),
+and restore as session C in another directory (it must not: else **LEAK**).
+
 ### The learning loop: the socket that is easiest to build and never run
 
 Porting the trust *model* is easy — `score = relevance × trust_score`, a

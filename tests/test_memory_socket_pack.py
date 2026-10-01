@@ -397,7 +397,7 @@ def test_learn_needs_three_ignored_firings_for_one_negative_vote(world):
 
 def test_pack_yaml_learning_step_can_fail_and_version_bumped():
     data = yaml.safe_load((PACK / "pack.yaml").read_text(encoding="utf-8"))
-    assert data["version"] == "0.2.0"
+    assert tuple(int(x) for x in data["version"].split(".")) >= (0, 2, 0)
     steps = {s["id"]: s for s in data["steps"]}
     assert "--probe learn" in steps["learning-loop-votes"]["check"]["cmd"]
     assert steps["learning-loop-votes"]["check"]["cmd"] != steps["salvage-wired"]["check"]["cmd"]

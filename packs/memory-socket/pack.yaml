@@ -15,7 +15,7 @@
 #
 # Commands run from the repo root (where packs/ lives).
 name: memory-socket
-version: 0.2.0
+version: 0.2.1
 steps:
   - id: store-present
     instruction: >
@@ -137,18 +137,25 @@ steps:
       and is actually the feature being dead. Ours had never worked once. Write
       a carry under one id, read it back under a DIFFERENT one, and demand the
       content survives.
+    # The probe runs the REAL sequence in an isolated home: every PreCompact
+    # hook under session A, then every PostCompact hook under session B in the
+    # same directory (the marker must come back), then under session C in a
+    # DIFFERENT directory (the marker must not). Anchored regex, because the
+    # verdict line is what counts -- not any mention of the word.
     check:
-      type: contains
+      type: regex
       cmd: python packs/memory-socket/files/socket_doctor.py --probe restore
-      expect: "LIVE"
+      expect: "(?m)^LIVE "
     on_fail: >
-      Your restore hook returned nothing. If it keys the carry file on
-      session_id, that is the bug -- key on the working directory instead
-      (hashed, so sibling worktrees cannot collide). See
-      files/examples/restore_post_compact.py and the README section
-      "Audit yourself against the whole contract". Do NOT fix this by falling
-      back to "the newest carry file": that leaks another session's notes into
-      this one.
+      Read the verdict word. DEAD: the carry did not survive the session re-key
+      -- your restore hook keys the carry file on session_id alone. Key it on
+      the working directory as well (hashed, so sibling worktrees cannot
+      collide), as files/examples/salvage_pre_compact.py and
+      restore_post_compact.py now do. LEAK: a carry from one directory was
+      restored into another -- your lookup falls back to something not scoped
+      to cwd, typically "the newest carry file"; remove that fallback, it
+      prints another session's findings as this session's facts. DARK: salvage
+      and restore are one mechanism -- register both PreCompact and PostCompact.
       .
       CWD IS THE RIGHT LOOKUP KEY, BUT DO NOT *MERGE* ACROSS IT (added
       2026-08-28). A cwd key matches every session that ever ran at that path,

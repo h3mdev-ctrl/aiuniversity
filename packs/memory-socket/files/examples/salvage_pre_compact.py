@@ -45,6 +45,18 @@ import os as _os
 CARRY_DIR = (pathlib.Path(_os.environ.get("CLAUDE_HOME") or (pathlib.Path.home() / ".claude"))
              / "state" / "compact_carry")
 
+
+def cwd_key(cwd: str) -> str:
+    """16-hex hash of the resolved, lower-cased working directory.
+    MUST stay byte-identical to restore_post_compact.cwd_key -- the two hooks
+    only meet through this string."""
+    import hashlib
+    try:
+        norm = str(pathlib.Path(cwd).resolve())
+    except OSError:
+        norm = cwd
+    return hashlib.sha256(norm.lower().encode("utf-8")).hexdigest()[:16]
+
 # What is worth keeping: a number, or a verdict.
 KEEP_RE = re.compile(
     r"(\d+\s*(?:ms|s\b|%|MB|rows?|files?)|\b\d+/\d+\b|\b\d+\.\d+\b|"
@@ -142,13 +154,21 @@ def main() -> int:
         if not digest:
             return 0
 
-        # Path 1: durable file, keyed by SESSION. Never write to a shared
-        # "latest.md" -- several sessions compact at once and the restore hook
-        # would hand one session's notes to another.
+        # Path 1: durable files under TWO keys. Never a shared "latest.md" --
+        # several sessions compact at once and restore would hand one session's
+        # notes to another.
+        #   <session>.md       exact, but Claude Code assigns a NEW session_id
+        #                      at compaction, so restore almost never finds it
+        #   cwd-<hash>.md      survives the re-key and stays scoped to one
+        #                      working directory (sibling worktrees hash apart)
+        # The origin header lets restore say where the carry came from.
         sid = re.sub(r"[^A-Za-z0-9_-]", "_", str(data.get("session_id") or "s"))[:64]
+        cwd = str(data.get("cwd") or _os.getcwd())
+        stamped = f"<!-- origin-session: {sid} cwd-key: {cwd_key(cwd)} -->\n{digest}"
         try:
             CARRY_DIR.mkdir(parents=True, exist_ok=True)
-            (CARRY_DIR / f"{sid}.md").write_text(digest, encoding="utf-8")
+            (CARRY_DIR / f"{sid}.md").write_text(stamped, encoding="utf-8")
+            (CARRY_DIR / f"cwd-{cwd_key(cwd)}.md").write_text(stamped, encoding="utf-8")
             for old in sorted(CARRY_DIR.glob("*.md"),
                               key=lambda f: f.stat().st_mtime)[:-40]:
                 old.unlink(missing_ok=True)
