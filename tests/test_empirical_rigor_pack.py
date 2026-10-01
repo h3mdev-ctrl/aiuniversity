@@ -89,5 +89,18 @@ def test_pack_loads_with_its_steps():
     pack = load_pack(REPO / "packs" / "empirical-rigor" / "pack.yaml")
     assert pack.name == "empirical-rigor"
     assert [s.id for s in pack.steps] == [
-        "rules-installed", "wired-into-constitution", "soft-by-design-note",
+        "rules-installed", "wired-into-constitution",
     ]
+
+
+def test_every_check_can_fail(tmp_path):
+    # Each step's check must go RED on an empty CLAUDE_HOME -- a step that passes
+    # where nothing is installed (the old soft-by-design-note, `exit(0)`) proves
+    # nothing.
+    import shlex
+    pack = load_pack(REPO / "packs" / "empirical-rigor" / "pack.yaml")
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path))
+    for step in pack.steps:
+        r = subprocess.run(shlex.split(step.check.cmd), cwd=REPO, env=env,
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode != 0, f"{step.id} passes on an empty home"

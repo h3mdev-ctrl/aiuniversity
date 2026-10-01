@@ -24,10 +24,12 @@ data (usage, load, failures) is often spiky by nature, and a smoothing statistic
 silently drops exactly the tail case the number exists to protect against.
 
 **How to apply:** list or plot the actual daily/period values before picking a
-formula. If the value is mostly near zero with occasional large jumps, use a max
-or a percentile (e.g. mean + 1.5x stdev, or the 90th percentile) over the same
-window instead of a mean -- and sanity-check the result against the single worst
-real value on record, not just the summary statistic.
+formula. If the value is mostly near zero with occasional large jumps, use the max
+or a high percentile (p90/p95) over the same window instead of a mean. Note that
+mean + k*stdev is still a smoothing statistic: on a zero-heavy series a single
+spike inflates the stdev yet the figure can still sit below the spikes it exists
+to cover. Sanity-check whatever you pick against the single worst real value on
+record, not just the summary statistic.
 
 ## 2. environment-parity-for-adhoc-runs -- a diagnostic script must mirror production's real environment, not a trimmed copy
 

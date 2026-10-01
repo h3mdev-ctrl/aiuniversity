@@ -75,6 +75,27 @@ The six guardrails:
   design; pretending otherwise is exactly the kind of false confidence the pack
   warns against.
 
+## Enforcement (opt-in)
+
+The always-loaded rules are the default. If a guardrail keeps slipping and you
+want a hard backstop:
+
+- **no-phantom-done for CODE** -- the code-quality pack's `stop_verify.py` already
+  runs your test suite before Claude may Stop:
+  `python -m runner.cli remediate packs/code-quality`
+- **no-phantom-done for CLAIMS** -- `phantom_claim_lint.py` lints *text* (stdin or
+  `--text`), exit 1 on an unevidenced claim. A Stop hook receives *JSON* with a
+  `transcript_path`, not text, so wiring it as a hook needs a small adapter that
+  reads the transcript and pipes the last assistant message into the linter. That
+  adapter is not shipped here; don't register the linter on Stop directly -- it
+  would lint the JSON envelope, not the reply.
+- research-before-asserting, judge-to-spec, no-vague-time-claims,
+  verify-mechanism-before-acting and verify-effect-not-acknowledgment have no
+  clean mechanical surface -- they stay soft rules by design.
+
+(This used to be a pack step whose check was `python -c "exit(0)"`. A check that
+cannot fail reads as verified while testing nothing, so the guidance lives here.)
+
 ## Related packs
 
 - **code-quality** -- `stop_verify.py` is the hard, opt-in Stop-hook backstop for the

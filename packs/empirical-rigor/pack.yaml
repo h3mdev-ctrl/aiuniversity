@@ -52,15 +52,3 @@ steps:
     on_fail: >
       The CLAUDE.md pointer is missing. Wire it in (safe, marker-wrapped):
       python packs/empirical-rigor/files/setup_empirical_rigor.py --install
-
-  - id: soft-by-design-note
-    instruction: >
-      All three guardrails stay soft by design -- none has a clean mechanical
-      surface the way no-phantom-done's completion claims do (there's no evidence
-      token to lint for "did you actually check the distribution/environment/deploy
-      history"). Naming the trigger in the always-loaded doc is the lever, same as
-      agent-honesty's research-before-asserting and judge-to-spec.
-      This step is informational and always passes.
-    check:
-      type: command_succeeds
-      cmd: python -c "exit(0)"
