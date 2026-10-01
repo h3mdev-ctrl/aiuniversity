@@ -83,12 +83,28 @@ want a hard backstop:
 - **no-phantom-done for CODE** -- the code-quality pack's `stop_verify.py` already
   runs your test suite before Claude may Stop:
   `python -m runner.cli remediate packs/code-quality`
-- **no-phantom-done for CLAIMS** -- `phantom_claim_lint.py` lints *text* (stdin or
-  `--text`), exit 1 on an unevidenced claim. A Stop hook receives *JSON* with a
-  `transcript_path`, not text, so wiring it as a hook needs a small adapter that
-  reads the transcript and pipes the last assistant message into the linter. That
-  adapter is not shipped here; don't register the linter on Stop directly -- it
-  would lint the JSON envelope, not the reply.
+- **no-phantom-done for CLAIMS** -- `phantom_claim_lint.py` lints *text*; a Stop
+  hook receives *JSON* with a `transcript_path`. `phantom_claim_stop.py` is the
+  adapter: it reads the transcript, takes the reply the user actually sees (every
+  assistant text block after the last tool result -- often several entries), and
+  lints that. Never register the bare linter on Stop; it would lint the JSON.
+  Opt in with one command:
+
+  ```
+  python packs/agent-honesty/files/setup_agent_honesty.py --install-stop-hook
+  python packs/agent-honesty/files/setup_agent_honesty.py --check-stop-hook
+  ```
+
+  **It installs in `warn` mode, and that is measured, not caution.** Replayed over
+  633 real final replies from 40 sessions, the linter flagged 67 (10.6%), and a
+  hand-checked sample was mostly false alarms ("the microphone is released" with
+  PIDs listed, "a published study", "Merged PRs: 94" as a table label). Blocking
+  at that rate interrupts about one reply in ten, mostly wrongly. `warn` never
+  blocks: it shows you a one-line flag and logs it to
+  `<home>/state/phantom_claim_stop.jsonl`. Review that log; switch to
+  `PHANTOM_STOP_MODE=block` only once the flags are mostly real.
+  `PHANTOM_STOP_DISABLE=1` turns it off without unregistering. It never loops
+  (`stop_hook_active`) and fails open on anything unexpected.
 - research-before-asserting, judge-to-spec, no-vague-time-claims,
   verify-mechanism-before-acting and verify-effect-not-acknowledgment have no
   clean mechanical surface -- they stay soft rules by design.
