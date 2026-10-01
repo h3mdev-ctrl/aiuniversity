@@ -285,6 +285,81 @@ If you already like your harness, porting wins on three counts:
   the version check moves. If you want to run Hermes properly, point it at a
   provider that sells you access: Nous Portal, OpenRouter, or a local model.
 
+### What production taught us (v0.2.0)
+
+Two changes to the recall socket, both measured by the author on a live store in
+2026-09, and one lesson about health checks that cost more than either.
+
+**1. Semantic recall earns ONE slot, not the lead.** Hermes ships with its vector
+weight at zero, and the advice above ("start lexical, measure") stands. We measured,
+and the numbers did ask for embeddings, just not the way the headline suggested:
+
+| measurement | lexical | semantic |
+|---|---|---|
+| paraphrase benchmark, rank-1 (n=120) | 15% | **43%** |
+| 30 real prompts where lexical fired: top-1 relevant | 12/30 | 14/30 |
+| ...at least one of the two right | **19/30** | |
+| 24 prompts lexical stayed silent on: top-1 relevant | n/a | ~3/24 |
+
+The benchmark says "lead with semantic". The real prompts say the two are right on
+**different** prompts: lexical wins exact tokens ("delete the branch"), semantic
+wins paraphrase. So [`recall_on_prompt.py`](files/examples/recall_on_prompt.py)
+gives each branch one slot: `[lexical #1, semantic #1]`. When lexical is silent,
+semantic may inject **alone** only if top cosine >= 0.65 **and** (top-1 minus
+top-8) >= 0.10, which kept 5 of 7 relevant (71%). Absolute cosine alone does not
+separate: "ok lets do 1-4" scored 0.607 against real matches around 0.62. What gets
+embedded is each memory's `description:` frontmatter, not the body
+([`build_recall_index.py`](files/examples/build_recall_index.py)). The slot is
+optional and stays off until an index exists.
+
+**2. Trust now gates injection through an absolute floor.** `score = relevance x
+trust_score`, and nothing under `MIN_INJECT = 0.30` is injected. On the live store
+the band under 0.40 was right 25-30% of the time (worse than silence), but a 0.40
+floor sat above the median good hit, so the floor is 0.30 and the rest is carried
+by honest labelling: HIGH confidence at >= 0.45, "POSSIBLY relevant, a lead not an
+instruction" below. `MAX_HITS = 2` (swept: 2 beat 3). A memory the learning loop
+votes down loses its slot through this floor before it ever reaches `min_trust`.
+
+**3. Three stacked silent failures, all behind `except: pass`, all while every
+health check said HEALTHY.** The semantic branch was designed to fail open, so a
+failure looked exactly like success: lexical kept emitting, the probe saw output.
+
+| # | the failure | how long | why nothing noticed |
+|---|---|---|---|
+| 1 | `NameError`: the call site used `Path`; the module only did `import pathlib` | **3 weeks**: the semantic branch never ran once | the bare `except` ate it on every prompt |
+| 2 | embed timeout 1.5s < cold model load 3.1s; the client's disconnect **aborts** the load, so the model is never resident | every prompt after #1 was fixed | timeout, fail open, lexical-only, silently |
+| 3 | the "semantic" merge could only re-sort lexical's 2 hits, never replace one | from day one | it was not what the benchmark measured, and nothing compared the two |
+
+The fixes are in the example. #2 spawns a **detached** warm-up request on timeout
+(long timeout, `keep_alive`), so only the first prompt after an idle spell misses.
+#3 is the one-slot-each merge. #1's lesson is structural: **a fail-open branch must
+be able to say that it ran.** With `RECALL_TRACE=1` the hook prints one stderr line
+per branch that executed (`trace: lexical ran, 1 hit`, `trace: semantic ran,
+top=0.69 gap=0.12`, `trace: semantic SKIPPED: TimeoutError`), and
+`socket_doctor.py --probe recall` reads them: a configured branch that reports
+SKIPPED, or never reports at all, makes the verdict **DEGRADED**, not LIVE.
+
+Two smaller ones worth stealing: call the embed server on `127.0.0.1`, not
+`localhost` (on Windows `localhost` tries `::1` first, +0.13s per call on a hook
+that runs every prompt); and cache the index as a `.npy` sidecar (parsing a 16 MB
+JSON cost ~0.33s per prompt; the sidecar loads in milliseconds).
+
+**The same class hit identity.** The nightly refresh of the user model failed
+silently for a month, and the SessionStart hook kept injecting a month-old
+"current focus" that read exactly as current as a fresh one.
+[`identity_on_start.py`](files/examples/identity_on_start.py) now withholds the
+model past `STALE_DAYS = 3` and prints one line saying so (the alarm the refresh
+never raised), and the doctor reports that as DEGRADED.
+
+**And the learning-loop check was itself decoration.** Its step ran the same
+command as `salvage-wired`, so it passed whenever *any* PreCompact hook was
+registered. `socket_doctor.py --probe learn` now runs whatever is on PreCompact
+against a throwaway store in which one helpful vote is planted, and fails unless a
+trust value actually moves. [`learn_on_compact.py`](files/examples/learn_on_compact.py)
+is now a runnable voter against the same `<memory>/.recall/` store recall writes
+(`trust.json`, `fires.jsonl`), with a scored-firings ledger so a re-run never
+votes twice, and `--revert`.
+
 ---
 
 ## Contract
@@ -308,6 +383,17 @@ If you already like your harness, porting wins on three counts:
   and never the body. Atoms collapse back to one hit per memory by MAX.
 - **Every firing is logged.** `{ts, prompt, hits[]}` appended per fire, so
   precision is measurable rather than felt.
+- **Every fail-open branch is traceable.** `RECALL_TRACE=1` makes the recall hook
+  print one stderr line per branch that executed; `--probe recall` turns a
+  SKIPPED or silent configured branch into **DEGRADED** (exit 1), and runs a
+  negative control: `"ok"` must inject nothing. Output reads `LIVE` only when
+  every configured branch ran.
+- **The learning loop is probed by its effect.** `--probe learn` plants one owed
+  vote in a temp store and passes only if a trust value moves.
+- **Semantic is one slot, gated, optional.** Lexical #1 + semantic #1; semantic
+  alone only past top >= 0.65 and gap >= 0.10; off until an index exists.
+- **A stale user model is withheld, not injected.** Past `STALE_DAYS` the
+  identity hook prints one line saying so.
 
 ## Iron Laws
 
@@ -329,6 +415,12 @@ If you already like your harness, porting wins on three counts:
   decoration on the score formula. Either wire a voter — inferred votes are
   acceptable if they are timid, identifier-grade and reversible — or state
   plainly that memories are never pruned.
+- **A fail-open branch must be able to say it ran.** Failing open is right for a
+  hook; failing open *invisibly* is how a branch stays dead for three weeks while
+  every check reads HEALTHY. Trace what executed, and make the doctor read it.
+- **A check that cannot fail is not a check.** Break the thing it guards and
+  watch it go red before you trust it green. Ours ran the same command as the
+  step before it and passed on any registered hook.
 - **Silence is a failure state, not a pass.** The worst outcome is a hook that is
   registered, exits 0, and does nothing — it survives every audit you would think to
   run. This is why the doctor probes rather than trusting registration.
@@ -366,6 +458,26 @@ If you already like your harness, porting wins on three counts:
 - ❌ **Skipping trivial turns with a word count.** "under 4 words" drops
   "why is CI red?" and admits "ok sure thanks mate". Anchor a whitelist to end of
   string instead.
+- ❌ **`except: pass` around an optional branch with no trace.** Fail open, yes,
+  but a swallowed `NameError` kept our semantic branch dead for three weeks
+  while lexical output made every health check read HEALTHY.
+- ❌ **Letting the paraphrase benchmark decide the merge.** Semantic won the
+  benchmark 43% to 15%, yet on real prompts the two were right on *different*
+  prompts (19/30 had at least one right). Give each branch a slot.
+- ❌ **A "hybrid" that can only re-sort the lexical hits.** If semantic can
+  never *replace* a wrong lexical hit, you shipped a reorder, not the arm you
+  measured.
+- ❌ **An embed timeout shorter than a cold model load, with no warm-up.** The
+  client disconnect aborts the load, so the model is never resident and every
+  prompt silently falls back. Spawn a detached warm-up on timeout.
+- ❌ **`localhost` in a per-prompt hook on Windows.** It tries `::1` first:
+  +0.13s every call. Use `127.0.0.1`.
+- ❌ **Letting semantic inject alone on cosine alone.** "ok lets do 1-4" scored
+  0.607 against real matches near 0.62. Require a peak (top-1 minus top-8) too.
+- ❌ **Injecting a user model whose refresh has stopped.** A month-old "current
+  focus" reads as current. Suppress past a staleness bound and say so.
+- ❌ **A check that runs the same command as the step before it.** It tests the
+  previous step twice and the thing it names never.
 - ❌ **Indexing one row per FILE.** The headline defect. Measured 20% precision
   against 75% for the same corpus and the same scoring maths indexed as atoms.
   It is invisible without a log and it cannot be tuned out — no threshold

@@ -12,9 +12,10 @@
 # Run guardrails first (foundation layer-3 does this).
 # Then install whichever hooks fit your workflow.
 #
-# BEFORE YOU WRITE OR EDIT A GUARD: read files/GUARD_DESIGN.md. Eight rules, each
+# BEFORE YOU WRITE OR EDIT A GUARD: read files/GUARD_DESIGN.md. Nine rules, each
 # paid for with a real defect on a live machine (~30 hooks, 46,857 tool calls,
-# 441 sessions) inside a single day. The two that cost most:
+# 441 sessions); rules 1-8 inside a single day, rule 9 (probe the branch, not the
+# hook) three weeks later. The two that cost most:
 #
 #   * A broken guard and a quiet guard look IDENTICAL. PreToolUse treats an
 #     unexpected exit as a NON-BLOCKING error, so a crashed guard PERMITS while

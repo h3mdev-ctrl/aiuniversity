@@ -323,3 +323,42 @@ sit in a loop waiting on a process you started from a tool call.
 (Related trap in the same family — a `.done` sentinel written unconditionally
 says "this finished", not "this succeeded". Have the job write its exit code into
 the file, and read *that*.)
+
+---
+
+## 15. A User-scope `ANTHROPIC_BASE_URL` silently breaks every scheduled `claude -p`
+
+Symptom: a scheduled job that shells out to `claude --print` exits 1 every night.
+The log shows only a banner -- `claude.ai connectors are disabled because
+ANTHROPIC_API_KEY or another auth source is set` -- because the job logged the
+first 300 characters of **stderr**. The real error is on **stdout**, inside the
+JSON result: `"API Error: Connection refused"`.
+
+Cause: someone once pointed Claude at a local proxy (LiteLLM on
+`127.0.0.1:4000`, with a placeholder `ANTHROPIC_API_KEY`) by setting both as
+**User-scope environment variables**. The desktop app strips them from its own
+sessions, so everything you run by hand works. Task Scheduler does not -- every
+scheduled `claude` call inherits them, aims at a proxy that is not running, and
+is refused. On the author's box this broke four separate jobs over a month,
+each diagnosed from scratch.
+
+Check (names only, never print values):
+
+```powershell
+[Environment]::GetEnvironmentVariables('User').Keys | Where-Object { $_ -match 'ANTHROPIC|BASE_URL' }
+```
+
+Fix, in order of preference:
+1. If nothing needs the proxy, delete the User-scope variables:
+   `[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', $null, 'User')`
+   (and the same for `ANTHROPIC_API_KEY` if it is a placeholder).
+2. Otherwise scrub them at the top of every scheduled wrapper, before `claude` runs:
+
+```powershell
+foreach ($v in 'ANTHROPIC_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_MODEL') {
+    Remove-Item "Env:\$v" -ErrorAction SilentlyContinue
+}
+```
+
+And log **both** streams on failure. A log that keeps only stderr's first line
+will show you the same harmless banner every night for a month.

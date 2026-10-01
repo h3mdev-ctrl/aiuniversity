@@ -1,6 +1,7 @@
 # Designing a guard that survives contact
 
-Eight rules, each paid for with a real defect on a live machine in a single day.
+Nine rules, each paid for with a real defect on a live machine -- rules 1-8 in
+a single day, rule 9 three weeks later.
 They are ordered by how expensive the lesson was.
 
 The setting: ~30 hooks, 46,857 tool calls across 441 sessions. Two of the hooks
@@ -294,6 +295,33 @@ a second rule waiting to be written.
 
 ---
 
+## 9. A fail-open branch is a silent branch. Probe the BRANCH, not the hook
+
+Rule 1 checks that a hook answers. That is not enough when the hook has more
+than one path. A memory-recall hook shipped a second, semantic branch inside a
+fail-open `try/except: pass`. The branch raised `NameError` (`Path` used, only
+`pathlib` imported) on every prompt for three weeks. The lexical branch kept
+printing results, so the hook answered, `hook_doctor` said ok, and the benchmark
+gain the branch was installed for (rank-1 15% -> 43%) never happened.
+
+Fixing the import exposed the next layer: the branch's 1.5s embed timeout was
+shorter than the model's 3.1s cold load, and the client disconnect aborted the
+load, so the model was never resident. Two stacked failures, both invisible.
+
+**Rule:** a fail-open hook with N branches needs a trace mode (an env var that
+prints, to stderr, one line per branch that EXECUTED, and the exception type for
+any that were swallowed) and a probe that requires every configured branch to
+report. "It printed something" passes on the broken system; "every branch
+ran" does not.
+
+The same rule, one level up: **an empty queue is not a live producer.** A
+post-session scanner crashed on every run for two weeks (one duplicate row
+rolled back each batch). The backlog check read `pending=0 undrained=0` and
+reported OK -- true, and meaningless. The discriminating number was "hours since
+the producer last COMMITTED", which read 360.
+
+---
+
 ## A corollary: a pattern list is an allowlist of things you remembered
 
 A redactor and a log scanner were maintained as two separate pattern lists.
@@ -312,7 +340,7 @@ what the redactor could not name.
 
 ---
 
-## The shape underneath all eight
+## The shape underneath all nine
 
 Every one is the same failure: **a component that cannot report its own
 brokenness.** A dead hook, a dead counter, a dark matcher, a blinded scan, a

@@ -235,7 +235,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 198 tests, all green
+python -m pytest tests/ -q      # 339 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -323,15 +323,27 @@ aiuniversity/
     verify.py           reads a pack, runs each check, escape-hatch state machine
     cli.py              the command SKILL.md calls (JSON out)
   packs/
-    foundation/         the umbrella: pulls the memory + gbrain packs in as modules
-    identity/           an interview: who you are + how Claude should talk to you
-    memory/             sets up a compounding memory + always-loaded resolver index
-    guardrails/         PreToolUse hooks that block credential reads (proven to fire)
-    gbrain-windows/     gbrain set up + proven live on Windows
-    windows-shell/      general Windows shell footguns (Python UTF-8/SSL, PS 5.1 .ps1)
-    obsidian-wiki/      a free-publishable LLM wiki, linked into memory
-    autolearn/          a git post-commit hook -> lessons filed into memory at wrap-up
-  tests/                198 tests
+    foundation/            the umbrella: pulls the memory + gbrain packs in as modules
+    identity/              an interview: who you are + how Claude should talk to you
+    memory/                sets up a compounding memory + always-loaded resolver index
+    memory-socket/         wires memory into the lifecycle (recall, identity, compaction,
+                           subagents) and PROVES each branch runs, not just the hook
+    episodes/              structured failure records, recalled on identifiers
+    context/               SessionStart orientation + PostCompact re-read
+    autolearn/             a git post-commit hook -> lessons filed into memory at wrap-up
+    wrap-up/               session close-out skill: ship gate + deploy gate + autolearn
+    guardrails/            PreToolUse hooks that block credential reads (proven to fire)
+    hooks/                 opt-in behavioural guards + hook_doctor + guard_regression
+    safety/                the most dangerous tool calls, caught before they run
+    secret-hygiene/        stop a credential reaching disk, and reaching a remote
+    agent-honesty/         guardrails against confident-but-false reporting
+    code-quality/          hooks that close the gap between "wrote code" and "it works"
+    audit/                 observability, notification and rollback-safety hooks
+    gbrain-windows/        gbrain set up + proven live on Windows
+    gbrain-local-reranker/ a free local reranker in place of the hosted one
+    windows-shell/         Windows shell footguns (UTF-8/SSL, PS 5.1, scheduled-task env)
+    obsidian-wiki/         a free-publishable LLM wiki, linked into memory
+  tests/                   339 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -352,7 +364,7 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 198 tests green.
+teach/verify/remediate skill — 339 tests green.
 
 Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
@@ -377,6 +389,16 @@ Packs:
   commit, and a reflection pass files durable lessons into memory (new memory +
   resolver row). Self-improvement companion to the memory pack.
 - **foundation** — the umbrella; threads memory + gbrain through as modules.
+- **memory-socket** — the wiring half of memory: recall on every prompt,
+  identity at session start, salvage/restore around compaction, trust votes.
+  v0.2 adds one-slot-each lexical + semantic recall and a **branch-level probe**:
+  a fail-open hook that prints *something* is not proof its branches ran.
+- **episodes** — structured records of failed or non-obvious attempts (what was
+  tried, why it failed, what fixed it), recalled when a prompt names the same
+  file, symbol or version. The concrete instance; the lesson goes to memory.
+- **context**, **wrap-up**, **hooks**, **safety**, **secret-hygiene**,
+  **agent-honesty**, **code-quality**, **audit**, **gbrain-local-reranker** — see
+  each pack's README; every one ships a Contract, Iron Laws and Anti-Patterns.
 
 Every setup pack ships **worked examples modeled on a real, heavily-used system**
 (a mature memory index, a wiki filing guide + concept note + MOC, a brain filing

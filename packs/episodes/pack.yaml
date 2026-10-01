@@ -1,0 +1,83 @@
+# episodes -- remember the DEAD ENDS, and surface them before you walk into one again.
+#
+# A memory note holds the generalised lesson ("validate every patch anchor first").
+# An episode holds the concrete instance: the file, symbol or version, what was
+# tried, why it failed, what fixed it. It is logged append-only to
+# <CLAUDE_HOME>/state/episodes.jsonl and recalled by a UserPromptSubmit hook that
+# fires only when the prompt names an IDENTIFIER that also appears in an episode.
+#
+# Standalone: the store lives beside, not inside, the memory pack's folder, so this
+# pack does not require it -- but the lessons an episode teaches belong there.
+#
+# Commands run from the repo root (where packs/ lives).
+name: episodes
+version: 0.1.0
+steps:
+  - id: store-ready
+    instruction: >
+      Create the episode store -- one JSON line per failed or non-obvious attempt,
+      at <CLAUDE_HOME>/state/episodes.jsonl. Append-only and never rotated: episodes
+      are small, and a dead end from six months ago is exactly the one you forgot.
+    check:
+      type: command_succeeds
+      cmd: python packs/episodes/files/setup_episodes.py --check-store
+    fix: python packs/episodes/files/setup_episodes.py --init-store
+    on_fail: >
+      No store yet, or a line in it is not valid JSON (the output names how many).
+      Create it with: python packs/episodes/files/setup_episodes.py --init-store
+
+  - id: hook-installed
+    instruction: >
+      Install the recall hook. It copies episodes.py to <CLAUDE_HOME>/episodes.py and
+      recall_episodes_hook.py into <CLAUDE_HOME>/hooks, then adds ONE UserPromptSubmit
+      entry to settings.json -- merged beside your existing hooks, never replacing
+      them. Running it twice changes nothing.
+    check:
+      type: command_succeeds
+      cmd: python packs/episodes/files/setup_episodes.py --check
+    fix: python packs/episodes/files/setup_episodes.py
+    on_fail: >
+      The hook is missing, unregistered, or registered twice. Run
+      python packs/episodes/files/setup_episodes.py -- if it says settings.json
+      could not be read, fix that JSON by hand first (the installer refuses to
+      overwrite a file it cannot parse).
+
+  - id: hook-live
+    instruction: >
+      Prove the recall BRANCH runs, not just that the hook exits 0. The probe logs a
+      canary episode with a unique identifier into a temporary store, sends a prompt
+      naming it through the installed hook with EPISODES_TRACE=1, and needs the canary
+      in the output AND the trace line from the search branch. A control prompt that
+      shares ordinary words but not the identifier must inject nothing. Your real
+      store is not touched.
+    check:
+      type: contains
+      cmd: python packs/episodes/files/setup_episodes.py --probe
+      expect: "PROBE PASS"
+    on_fail: >
+      The output names which half failed. "no branch trace" means the hook ran but
+      its search branch did not -- an exception was swallowed by the fail-open
+      wrapper; the trace output printed below it shows the EXCEPTION line. "control
+      prompt injected context" means word overlap is firing recall: the hook must
+      call search with require_ident=True.
+
+  - id: log-your-first
+    instruction: >
+      Log a real episode the next time an approach fails or a fix was non-obvious.
+      Name the identifier -- recall matches on identifiers, not prose.
+    teach: >
+      The next time something fails and you work out why, log it in one command:
+      python ~/.claude/episodes.py --log --task "config_loader.py:88 rejects the new
+      schema" --tried "bumped the schema version only" --outcome fail --why "the
+      loader caches the old schema under _SCHEMA_CACHE" --fix "clear _SCHEMA_CACHE on
+      version change" --tags config,cache
+      Put the identifier (file:line, symbol, version) in --task; that is what fires
+      recall later. Then write the GENERAL lesson as a memory note -- the episode is
+      the evidence, the note is the rule. Search before retrying something that feels
+      familiar: python ~/.claude/episodes.py --search "config_loader"
+    check:
+      type: command_succeeds
+      cmd: python packs/episodes/files/episodes.py --count
+    on_fail: >
+      No real episode logged yet (probe canaries do not count). That is expected on a
+      fresh install -- log one the next time an attempt fails, then re-run verify.

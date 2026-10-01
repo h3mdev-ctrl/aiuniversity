@@ -31,7 +31,9 @@ import re
 import sys
 import time
 
-CARRY_DIR = pathlib.Path.home() / ".claude" / "state" / "compact_carry"
+# Must match salvage_pre_compact.py: both honour CLAUDE_HOME.
+CARRY_DIR = (pathlib.Path(os.environ.get("CLAUDE_HOME") or (pathlib.Path.home() / ".claude"))
+             / "state" / "compact_carry")
 MAX_AGE_S = 3600      # older than this and it belongs to a previous compaction
 
 
