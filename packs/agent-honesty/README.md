@@ -1,12 +1,12 @@
 # agent-honesty
 
-Four guardrails against the failure mode a weak or hurried model falls into most:
+Six guardrails against the failure mode a weak or hurried model falls into most:
 **reporting confidently instead of truthfully.** It installs the rules as an
 always-loaded doc wired into your constitution, and gives the one guardrail with a
 mechanical surface -- `no-phantom-done` -- a deterministic, model-free linter that
 proves an unevidenced completion claim is catchable.
 
-The four guardrails:
+The six guardrails:
 
 - **no-phantom-done** -- never claim a side-effect (done / committed / pushed /
   logged / saved / deployed) or a verification result ("all tests pass") unless the
@@ -18,10 +18,18 @@ The four guardrails:
 - **no-vague-time-claims** -- check the clock before naming a time of day or date;
   don't infer "tonight"/"this morning" from message order or how a long
   conversation feels.
+- **verify-mechanism-before-acting** -- before a live system takes a new or bigger
+  real-world action, check that exact path has actually run successfully under
+  comparable conditions; a plausible, sourced mechanism (docs, a vendor forum) is
+  not the same as a proven one.
+- **verify-effect-not-acknowledgment** -- a write returning success (200 OK, no
+  exception) is not proof the intended effect happened; confirm with an
+  independent read, and when it doesn't match, diff the full payload shape, not
+  just the field you meant to change.
 
 ## Contract
 
-- Installs `~/.claude/agent_honesty.md` carrying all three guardrails, each with its
+- Installs `~/.claude/agent_honesty.md` carrying all six guardrails, each with its
   trigger, rule, **Why**, and **How to apply**.
 - Wires a pointer block into `~/.claude/CLAUDE.md` (marker-wrapped, idempotent) so
   the guardrails load every session and coexist with your existing constitution.
@@ -61,10 +69,32 @@ The four guardrails:
   re-implement them.
 - ❌ Claiming this pack *guarantees* honesty. It's a lint plus always-loaded rules --
   it forces the model to pair a claim with evidence; it cannot read the model's mind.
-- ❌ Letting `research-before-asserting` / `judge-to-spec` / `no-vague-time-claims`
-  masquerade as code-enforced. They have no clean mechanical surface and stay soft
-  rules by design; pretending otherwise is exactly the kind of false confidence the
-  pack warns against.
+- ❌ Letting `research-before-asserting` / `judge-to-spec` / `no-vague-time-claims` /
+  `verify-mechanism-before-acting` / `verify-effect-not-acknowledgment` masquerade
+  as code-enforced. They have no clean mechanical surface and stay soft rules by
+  design; pretending otherwise is exactly the kind of false confidence the pack
+  warns against.
+
+## Enforcement (opt-in)
+
+The always-loaded rules are the default. If a guardrail keeps slipping and you
+want a hard backstop:
+
+- **no-phantom-done for CODE** -- the code-quality pack's `stop_verify.py` already
+  runs your test suite before Claude may Stop:
+  `python -m runner.cli remediate packs/code-quality`
+- **no-phantom-done for CLAIMS** -- `phantom_claim_lint.py` lints *text* (stdin or
+  `--text`), exit 1 on an unevidenced claim. A Stop hook receives *JSON* with a
+  `transcript_path`, not text, so wiring it as a hook needs a small adapter that
+  reads the transcript and pipes the last assistant message into the linter. That
+  adapter is not shipped here; don't register the linter on Stop directly -- it
+  would lint the JSON envelope, not the reply.
+- research-before-asserting, judge-to-spec, no-vague-time-claims,
+  verify-mechanism-before-acting and verify-effect-not-acknowledgment have no
+  clean mechanical surface -- they stay soft rules by design.
+
+(This used to be a pack step whose check was `python -c "exit(0)"`. A check that
+cannot fail reads as verified while testing nothing, so the guidance lives here.)
 
 ## Related packs
 

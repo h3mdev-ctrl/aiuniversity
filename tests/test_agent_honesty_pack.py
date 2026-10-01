@@ -39,7 +39,9 @@ def test_install_writes_doc_and_wires_constitution(tmp_path):
     assert doc.exists()
     text = doc.read_text(encoding="utf-8")
     for marker in ("## 1. no-phantom-done", "## 2. research-before-asserting",
-                   "## 3. judge-to-spec", "## 4. no-vague-time-claims"):
+                   "## 3. judge-to-spec", "## 4. no-vague-time-claims",
+                   "## 5. verify-mechanism-before-acting",
+                   "## 6. verify-effect-not-acknowledgment"):
         assert marker in text
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "agent-honesty-pointer:start" in claude_md
@@ -121,5 +123,28 @@ def test_pack_loads_with_its_steps():
     assert pack.name == "agent-honesty"
     assert [s.id for s in pack.steps] == [
         "rules-installed", "wired-into-constitution",
-        "phantom-claim-linter-fires", "enforcement-note",
+        "phantom-claim-linter-fires",
     ]
+
+
+def test_no_step_check_is_a_constant_pass():
+    # A check like `python -c "exit(0)"` passes on every machine and so proves
+    # nothing; the old enforcement-note step was exactly that.
+    import re
+    pack = load_pack(REPO / "packs" / "agent-honesty" / "pack.yaml")
+    for step in pack.steps:
+        assert not re.search(r"-c\s+[\"']?\s*(exit|sys\.exit)\(0\)", step.check.cmd), step.id
+
+
+def test_install_steps_go_red_on_an_empty_home(tmp_path):
+    # The install checks must FAIL before install. (phantom-claim-linter-fires
+    # tests the linter in the repo, not an install, so it is exempt here.)
+    import shlex
+    pack = load_pack(REPO / "packs" / "agent-honesty" / "pack.yaml")
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path))
+    for step in pack.steps:
+        if step.id == "phantom-claim-linter-fires":
+            continue
+        r = subprocess.run(shlex.split(step.check.cmd), cwd=REPO, env=env,
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode != 0, f"{step.id} passes on an empty home"
