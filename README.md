@@ -235,7 +235,7 @@ guessing if a fix doesn't hold.
 **Run the tests:**
 
 ```bash
-python -m pytest tests/ -q      # 352 tests, all green
+python -m pytest tests/ -q      # 360 tests, all green
 ```
 
 **Set up a compounding memory** (creates the structure, wires it, proves recall):
@@ -329,6 +329,7 @@ aiuniversity/
     memory-socket/         wires memory into the lifecycle (recall, identity, compaction,
                            subagents) and PROVES each branch runs, not just the hook
     episodes/              structured failure records, recalled on identifiers
+    recall-discipline/     check memory before researching; consolidate, don't accumulate
     context/               SessionStart orientation + PostCompact re-read
     autolearn/             a git post-commit hook -> lessons filed into memory at wrap-up
     wrap-up/               session close-out skill: ship gate + deploy gate + autolearn
@@ -343,7 +344,7 @@ aiuniversity/
     gbrain-local-reranker/ a free local reranker in place of the hosted one
     windows-shell/         Windows shell footguns (UTF-8/SSL, PS 5.1, scheduled-task env)
     obsidian-wiki/         a free-publishable LLM wiki, linked into memory
-  tests/                   352 tests
+  tests/                   360 tests
   docs/                 the thinking trail (below)
 ```
 
@@ -364,7 +365,7 @@ The thinking trail lives in [`docs/`](docs/): [design](docs/design.md) (what & w
 
 **v1 engine + four packs: complete.** Matcher, runner, escape hatch, validation,
 `modules:` composition, per-pack **variants** (local/hosted choices), CLI, and the
-teach/verify/remediate skill — 352 tests green.
+teach/verify/remediate skill — 360 tests green.
 
 Packs:
 - **identity** — an interview (layer 0): who you are + how Claude should talk to
@@ -396,6 +397,10 @@ Packs:
 - **episodes** — structured records of failed or non-obvious attempts (what was
   tried, why it failed, what fixed it), recalled when a prompt names the same
   file, symbol or version. The concrete instance; the lesson goes to memory.
+- **recall-discipline** (contributed by Jason) — three always-loaded guardrails
+  against re-deriving knowledge you already have: check memory before
+  researching outward, fold 3+ notes on one topic into a canonical reference,
+  and treat "this is a project" as a request to build its durable home now.
 - **context**, **wrap-up**, **hooks**, **safety**, **secret-hygiene**,
   **agent-honesty**, **code-quality**, **audit**, **gbrain-local-reranker** — see
   each pack's README; every one ships a Contract, Iron Laws and Anti-Patterns.

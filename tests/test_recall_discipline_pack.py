@@ -74,5 +74,17 @@ def test_pack_loads_with_its_steps():
     pack = load_pack(REPO / "packs" / "recall-discipline" / "pack.yaml")
     assert pack.name == "recall-discipline"
     assert [s.id for s in pack.steps] == [
-        "rules-installed", "wired-into-constitution", "enforcement-note",
+        "rules-installed", "wired-into-constitution",
     ]
+
+
+def test_every_check_can_fail(tmp_path):
+    # Each step's check must go RED on an empty home -- a step that passes on a
+    # machine where nothing is installed proves nothing.
+    import shlex
+    pack = load_pack(REPO / "packs" / "recall-discipline" / "pack.yaml")
+    env = dict(os.environ, CLAUDE_HOME=str(tmp_path))
+    for step in pack.steps:
+        r = subprocess.run(shlex.split(step.check.cmd), cwd=REPO, env=env,
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode != 0, f"{step.id} passes on an empty home"

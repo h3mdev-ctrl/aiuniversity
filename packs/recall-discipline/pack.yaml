@@ -8,6 +8,11 @@
 # no-vague-time-claims. Installed as an always-loaded doc + constitution
 # pointer, same shape as agent-honesty.
 #
+# There is deliberately NO informational "always passes" step: a check that
+# cannot fail reads as verified while testing nothing (see the "Liveness"
+# section of docs/memory-layers.md). The soft-by-design note lives in the
+# README Contract instead.
+#
 # Requested via Nexus. Commands run from the repo root.
 name: recall-discipline
 version: 0.1.0
@@ -40,13 +45,3 @@ steps:
     on_fail: >
       The CLAUDE.md pointer is missing. Wire it in (safe, marker-wrapped):
       python packs/recall-discipline/files/setup_recall_discipline.py --install
-
-  - id: enforcement-note
-    instruction: >
-      All three guardrails are soft by design -- no clean mechanical surface
-      exists for "did you check memory first" or "should this be a project."
-      Naming the trigger in always-loaded context is the lever, not a hook.
-      This step is informational and always passes.
-    check:
-      type: command_succeeds
-      cmd: python -c "exit(0)"
