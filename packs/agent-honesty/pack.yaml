@@ -18,8 +18,9 @@
 # AND the one guardrail with a mechanical surface -- no-phantom-done -- gets a
 # deterministic, model-free linter that PROVES an unevidenced completion claim is
 # catchable. Enforcement is opt-in and documented in the README "Enforcement"
-# section (code-quality's stop_verify for the code-test case; the linter needs an
-# adapter to run as a Stop hook). There is deliberately no informational step:
+# section (code-quality's stop_verify for the code-test case; for claims,
+# phantom_claim_stop.py via `setup_agent_honesty.py --install-stop-hook`, warn
+# mode by default). There is deliberately no informational step:
 # its old check was `exit(0)`, which cannot fail and so proved nothing.
 #
 # Requested via Nexus (thread agent-honesty-pack). Guardrails 5-6 added from a
@@ -28,7 +29,7 @@
 # real-world actions rather than to claims made in chat. Commands run from the
 # repo root.
 name: agent-honesty
-version: 0.3.0
+version: 0.4.0
 steps:
   - id: rules-installed
     instruction: >

@@ -9,6 +9,9 @@ Modes:
     --check-doc            exit 0 if the rules doc is present with all three guardrails
     --check-wired          exit 0 if the CLAUDE.md pointer block is present
     --test-linter          run phantom_claim_lint over known cases, prove verdicts
+    --install-stop-hook    OPT-IN: copy the linter + Stop adapter into <home>/hooks/
+                           agent_honesty/ and register it on Stop (warn mode)
+    --check-stop-hook      exit 0 iff registered once AND it behaves (5 checks)
 
 Home: $CLAUDE_HOME or ~/.claude
 """
@@ -172,8 +175,122 @@ def test_linter() -> int:
     return 0
 
 
+# --- opt-in: the Stop-hook adapter -------------------------------------------
+# Not part of the default install and not a pack step: enforcement is opt-in
+# (README "Enforcement"). These modes exist so opting in is one safe command.
+
+STOP_FILES = ("phantom_claim_lint.py", "phantom_claim_stop.py")
+STOP_TAG = "phantom_claim_stop.py"
+
+
+def _stop_dir() -> pathlib.Path:
+    return base_dir() / "hooks" / "agent_honesty"
+
+
+def _settings_path() -> pathlib.Path:
+    return base_dir() / "settings.json"
+
+
+def _read_settings() -> dict:
+    import json
+    p = _settings_path()
+    if not p.exists() or not p.read_text(encoding="utf-8").strip():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))  # unparseable -> raise, never clobber
+    if not isinstance(data, dict):
+        raise ValueError(f"{p} is not a JSON object")
+    return data
+
+
+def _stop_registered(data: dict) -> int:
+    n = 0
+    for entry in ((data.get("hooks") or {}).get("Stop") or []):
+        for h in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+            if isinstance(h, dict) and STOP_TAG in str(h.get("command", "")):
+                n += 1
+    return n
+
+
+def install_stop_hook() -> int:
+    import json
+    import shutil
+    try:
+        data = _read_settings()
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"refusing: cannot parse {_settings_path()} ({e}); fix it first")
+        return 1
+    d = _stop_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    for name in STOP_FILES:
+        shutil.copyfile(_src_dir() / name, d / name)
+    if _stop_registered(data):
+        print(f"stop hook already registered; files refreshed in {d}")
+        return 0
+    cmd = f'"{sys.executable}" "{(d / "phantom_claim_stop.py").as_posix()}"'
+    data.setdefault("hooks", {}).setdefault("Stop", []).append(
+        {"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
+    p = _settings_path()
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, p)
+    print(f"registered phantom-claim Stop hook (warn mode) -> {d}")
+    print("  block mode: set PHANTOM_STOP_MODE=block   off: PHANTOM_STOP_DISABLE=1")
+    return 0
+
+
+def check_stop_hook() -> int:
+    """Registered exactly once, files present, AND it behaves: flags a planted
+    phantom claim (warn -> systemMessage, block -> exit 2), stays silent on an
+    evidenced one, and never re-fires when stop_hook_active is set."""
+    import json
+    import subprocess
+    import tempfile
+    try:
+        n = _stop_registered(_read_settings())
+    except Exception as e:
+        print(f"cannot read settings: {e}")
+        return 1
+    adapter = _stop_dir() / "phantom_claim_stop.py"
+    if n != 1 or not adapter.exists() or not (_stop_dir() / "phantom_claim_lint.py").exists():
+        print(f"stop hook not installed (registered {n}x, adapter present={adapter.exists()})")
+        return 1
+
+    def run(reply: str, mode: str, active: bool = False):
+        with tempfile.TemporaryDirectory() as td:
+            t = pathlib.Path(td) / "t.jsonl"
+            t.write_text("\n".join(json.dumps(o) for o in (
+                {"type": "user", "message": {"role": "user", "content": "do it"}},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": reply}]}},
+            )) + "\n", encoding="utf-8")
+            env = dict(os.environ, PHANTOM_STOP_MODE=mode, CLAUDE_HOME=td)
+            env.pop("PHANTOM_STOP_DISABLE", None)
+            return subprocess.run([sys.executable, str(adapter)], input=json.dumps(
+                {"transcript_path": str(t), "stop_hook_active": active}),
+                capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
+
+    phantom, evidenced = "Done -- pushed the fix to main.", "Pushed the fix (commit a1b2c3d, CI green)."
+    checks = [
+        ("block flags a phantom claim",    run(phantom, "block").returncode == 2),
+        ("warn never blocks",              run(phantom, "warn").returncode == 0),
+        ("warn tells the user",            "phantom-claim (warn)" in run(phantom, "warn").stdout),
+        ("evidenced claim is silent",      run(evidenced, "block").returncode == 0),
+        ("no loop when stop_hook_active",  run(phantom, "block", active=True).returncode == 0),
+    ]
+    bad = [name for name, ok in checks if not ok]
+    for name, ok in checks:
+        print(f"  {'OK ' if ok else 'FAIL'} {name}")
+    if bad:
+        return 1
+    print("phantom-claim Stop hook installed once and behaves (5/5 checks)")
+    return 0
+
+
 def main(argv: "list[str]") -> int:
     mode = argv[1] if len(argv) > 1 else "--install"
+    if mode == "--install-stop-hook":
+        return install_stop_hook()
+    if mode == "--check-stop-hook":
+        return check_stop_hook()
     if mode == "--install":
         return install()
     if mode == "--check-doc":
