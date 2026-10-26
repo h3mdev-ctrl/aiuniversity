@@ -146,7 +146,8 @@ checks by hand.
 separate claims requiring two separate pieces of evidence. When a write's effect
 doesn't show up on a follow-up read, compare the full read-back payload to the full
 write payload field-by-field before assuming the cause is the field you already
-suspect.
+suspect. (The same independent-read discipline applies to *inputs* before you
+build on them -- see `empirical-rigor` rule 4, reconcile-inputs-to-ground-truth.)
 
 ---
 

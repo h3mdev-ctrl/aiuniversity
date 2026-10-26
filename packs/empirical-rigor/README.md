@@ -1,13 +1,14 @@
 # empirical-rigor
 
-Three guardrails against a different failure than `agent-honesty`'s reporting
+Four guardrails against a different failure than `agent-honesty`'s reporting
 rules: not a false claim, but a **design built on an assumption that was never
 checked against reality** -- the real shape of historical data, the real runtime
-environment, the real deploy history. It installs the rules as an always-loaded
+environment, the real deploy history, the real values against an independent
+measure. It installs the rules as an always-loaded
 doc wired into your constitution, the same shape `agent-honesty` uses for its
 non-mechanical guardrails.
 
-The three guardrails:
+The four guardrails:
 
 - **distribution-before-statistic** -- look at the real shape of historical data
   before picking a mean/average to size a threshold or buffer. A spiky or
@@ -21,15 +22,21 @@ The three guardrails:
   that produced it has been running correctly the whole time. Check deploy
   history before citing "N days, zero gaps" as evidence of reliability -- a
   backfill can manufacture that same clean look in one run.
+- **reconcile-inputs-to-ground-truth** -- a complete, consistent feed is not a
+  correct one. Before sizing a threshold or running a backtest on a feed, compare
+  its totals with an independent measure (a bill, a meter, a bank statement, a
+  second sensor) over a real period, record the ratio, let it set the feed's role
+  (absolute amounts or shape only), tag outputs with the basis they were tuned on,
+  and test sibling feeds the same day when one turns out wrong.
 
 ## Contract
 
-- Installs `~/.claude/empirical_rigor.md` carrying all three guardrails, each
+- Installs `~/.claude/empirical_rigor.md` carrying all four guardrails, each
   with its trigger, rule, **Why**, and **How to apply**.
 - Wires a pointer block into `~/.claude/CLAUDE.md` (marker-wrapped, idempotent),
   coexisting with `agent-honesty`'s own pointer block and your existing
   constitution.
-- No linter: none of the three has a clean mechanical surface (each is a
+- No linter: none of the four has a clean mechanical surface (each is a
   judgment call about a design decision, not a lintable claim in text) -- they
   stay soft rules, same as `agent-honesty`'s research-before-asserting and
   judge-to-spec.
@@ -47,6 +54,9 @@ The three guardrails:
 - **Continuity is a fact about the data file, not about the process.** Never
   infer "the job has run correctly for N days" from "the file has N days with no
   gaps" without checking when the job doing the writing was actually deployed.
+- **Complete is not correct.** Never size a threshold or run a backtest on a feed
+  that has not been compared with an independent measure; if none exists, label
+  every output built on it unverified.
 - **Soft by default, same as agent-honesty's non-mechanical guardrails.** No Stop
   hook, no error state -- always-loaded context is the lever.
 
@@ -59,7 +69,9 @@ The three guardrails:
 - ❌ Citing a long, gap-free CSV or log as proof of reliable operation without
   checking the deploy/execution history behind it -- a backfill looks identical
   to genuine day-by-day success on the page.
-- ❌ Building a mechanical linter for any of these three to look more rigorous
+- ❌ Fixing one feed that read low and moving on, without testing the sibling
+  feeds that share its cause -- the one you didn't check keeps the error.
+- ❌ Building a mechanical linter for any of these four to look more rigorous
   than the pack actually is -- none has a clean evidence token to check for, and
   pretending otherwise is the same false confidence `agent-honesty` warns against.
 
