@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-setup_empirical_rigor.py -- install the three empirical-rigor guardrails as an
+setup_empirical_rigor.py -- install the four empirical-rigor guardrails as an
 always-loaded rules doc and wire a pointer into the constitution.
 
 Modes:
     (no arg) / --install   copy empirical_rigor.md into <home> + wire CLAUDE.md pointer
-    --check-doc            exit 0 if the rules doc is present with all three guardrails
+    --check-doc            exit 0 if the rules doc is present with all four guardrails
     --check-wired          exit 0 if the CLAUDE.md pointer block is present
 
 Home: $CLAUDE_HOME or ~/.claude
@@ -16,11 +16,12 @@ import sys
 
 DOC_NAME = "empirical_rigor.md"
 
-# The three guardrail headers that MUST be present for the doc to count as installed.
+# The four guardrail headers that MUST be present for the doc to count as installed.
 GUARDRAIL_MARKERS = (
     "## 1. distribution-before-statistic",
     "## 2. environment-parity-for-adhoc-runs",
     "## 3. continuity-is-not-uptime",
+    "## 4. reconcile-inputs-to-ground-truth",
 )
 
 POINTER_START = "<!-- empirical-rigor-pointer:start -->"
@@ -28,17 +29,21 @@ POINTER_END = "<!-- empirical-rigor-pointer:end -->"
 POINTER_BLOCK = f"""{POINTER_START}
 ## Empirical rigor (always applies)
 
-Three guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
+Four guardrails live in `~/.claude/{DOC_NAME}` and apply every turn:
 **distribution-before-statistic** (look at the real shape of historical data
 before picking a mean/average -- a spiky or bimodal distribution needs a max or
 percentile instead), **environment-parity-for-adhoc-runs** (a diagnostic
 invocation of production code must mirror its real mounts/env/config exactly, not
 a trimmed copy -- a shortened environment can silently produce false inputs),
-and **continuity-is-not-uptime** (a gap-free dataset is not proof a job has been
+**continuity-is-not-uptime** (a gap-free dataset is not proof a job has been
 running correctly -- check deploy history before citing "N days, zero gaps" as
-reliability). Read that file; when sizing a threshold from history, running
-anything ad-hoc against production code, or citing data continuity as evidence of
-uptime, follow it.
+reliability), and **reconcile-inputs-to-ground-truth** (a complete, consistent
+feed is not a correct one -- compare its totals with an independent measure over
+a real period, record the error, tag outputs with their basis, and test sibling
+feeds when one is wrong). Read that file; when sizing a threshold from history,
+running anything ad-hoc against production code, citing data continuity as
+evidence of uptime, or building on a feed nobody has checked against a bill or
+meter, follow it.
 {POINTER_END}
 """
 

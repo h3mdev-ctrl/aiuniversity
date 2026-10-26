@@ -1,5 +1,5 @@
 <!-- empirical-rigor:start -->
-# Empirical rigor -- three guardrails against trusting a convenient assumption over real data
+# Empirical rigor -- four guardrails against trusting a convenient assumption over real data
 
 > These are always-loaded behavioural rules. They target a different failure mode
 > than `agent-honesty`'s reporting guardrails: not a false claim, but a *design*
@@ -68,18 +68,48 @@ job actually firing.
 **Why:** continuity and correctness are independent properties -- a backfill
 script can manufacture a perfectly gap-free history in a single run, and that
 looks identical to genuine day-by-day success unless you check when the code was
-actually deployed.
+actually deployed. (The values-side twin of this is rule 4: a feed can be
+gap-free AND wrong.)
 
 **How to apply:** before trusting "clean for N days" as proof of reliability,
 check the deploy timestamp, git history, or scheduler log for the job that's
 supposed to have produced it. If the deploy is more recent than the data range,
 some or all of that history is backfilled, not observed.
 
+## 4. reconcile-inputs-to-ground-truth -- a complete, consistent feed is not a correct one
+
+**Trigger:** you are about to size a threshold, build a decision rule, or run a
+backtest on a data feed (usage, cost, yield, a sensor, an API field) whose values
+have never been compared with an independent measure.
+
+**Rule:** compare the feed's totals against something independent that is known to
+be right (a bill, a meter, a bank statement, a second sensor) over a real period --
+a full billing cycle, not a spot check -- and record the ratio and its direction.
+Let the result set the feed's role: usable for absolute amounts, or for shape only.
+Tag every threshold and backtest with the feed and basis it was tuned on. When one
+feed is found wrong, test every other feed of the same kind the same day.
+
+**Why:** complete, plausible, internally consistent data raises no alarm, so
+nothing prompts the check. In one real case a usage feed was documented as
+"shape only" after it under-read, but a sibling feed from the same vendor was never
+compared with the bill. It read 11-13% low, and every threshold and backtest tuned
+on it inherited the error for weeks until a bill comparison exposed it. Rule 3 says
+a gap-free file doesn't prove the job ran correctly; this rule says a correct-looking
+file doesn't prove the values are right.
+
+**How to apply:** at the start of the build, list the feeds you are standing on and
+name the independent source for each; if there is none, mark that feed unverified in
+every output built on it. Reconcile once over a full period and write the ratio next
+to the feed's documentation. Record the basis in the output itself (a column, a
+comment, a field) so a later correction can find and re-run what it touched. After
+any correction, sweep the sibling feeds before moving on.
+
 ---
 
-**The through-line:** all three replace a convenient assumption about data or
+**The through-line:** all four replace a convenient assumption about data or
 environment with a direct look at the real thing -- the actual distribution, the
-actual runtime environment, the actual deploy history. `agent-honesty` guards what
+actual runtime environment, the actual deploy history, the actual values against an
+independent measure. `agent-honesty` guards what
 the model *claims*; this pack guards what the model *builds things on top of*.
 Neither substitutes for the other.
 <!-- empirical-rigor:end -->

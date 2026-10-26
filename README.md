@@ -402,10 +402,11 @@ Packs:
   against re-deriving knowledge you already have: check memory before
   researching outward, fold 3+ notes on one topic into a canonical reference,
   and treat "this is a project" as a request to build its durable home now.
-- **empirical-rigor** (contributed by Jason) — three guardrails against building
+- **empirical-rigor** (contributed by Jason) — four guardrails against building
   on an unchecked assumption: look at the data's real shape before choosing a
-  statistic, mirror production's environment for ad-hoc runs, and don't read a
-  gap-free dataset as proof the job ran. agent-honesty gained two siblings in the
+  statistic, mirror production's environment for ad-hoc runs, don't read a
+  gap-free dataset as proof the job ran, and reconcile a feed against an
+  independent measure (a bill, a meter) before building on it. agent-honesty gained two siblings in the
   same change: verify a mechanism has actually run before trusting it with a
   bigger action, and verify the effect, not the API's acknowledgment.
 - **context**, **wrap-up**, **hooks**, **safety**, **secret-hygiene**,

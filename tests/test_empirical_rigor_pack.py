@@ -1,6 +1,6 @@
 """Tests for the empirical-rigor pack -- doc install + constitution wiring.
 
-Runs against a throwaway CLAUDE_HOME. All three guardrails are soft (no
+Runs against a throwaway CLAUDE_HOME. All four guardrails are soft (no
 mechanical linter, same as agent-honesty's research-before-asserting /
 judge-to-spec) so there's no behavioural-check surface to test beyond
 install/wiring, mirroring how those non-mechanical guardrails are covered.
@@ -38,7 +38,8 @@ def test_install_writes_doc_and_wires_constitution(tmp_path):
     text = doc.read_text(encoding="utf-8")
     for marker in ("## 1. distribution-before-statistic",
                    "## 2. environment-parity-for-adhoc-runs",
-                   "## 3. continuity-is-not-uptime"):
+                   "## 3. continuity-is-not-uptime",
+                   "## 4. reconcile-inputs-to-ground-truth"):
         assert marker in text
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "empirical-rigor-pointer:start" in claude_md
